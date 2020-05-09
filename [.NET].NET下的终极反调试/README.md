@@ -1,86 +1,86 @@
-# .NET下的终极反调试
+# .The ultimate debugging under NET
 
-## 前言
+## preamble
 
-0xd4d大神写过一个反调试器+反分析器的项目，叫做[antinet](https://github.com/0xd4d/antinet)，代码在github上。这个反调试的原理不是检测，而是主动攻击。如果识别成功，CLR中与调试有关的一些字段将直接被破坏，让调试线程退出，其它调试器也不能附加。理论上这个反调试是几乎无解的，除非让这个反调试内部的识别机制失效。
+The 0xd4d Great God wrote a project for an anti-debugger + anti-analyzer called [antinet](https://github.com/0xd4d/antinet), the code is on github. This anti-debugging principle is not detection, but active attack. If the identification is successful, some of the debugging-related fields in the CLR will be directly corrupted, allowing the debugging thread to exit and other debuggers to attach. Theoretically this anti-debugging is almost insoluble unless the internal identification mechanism of this anti-debugging is allowed to fail.
 
-**所以我对这个代码做了一些改进，增加了Win32函数检测调试器，增加了CLR内部函数的Hook检测，顺便移除了反分析器的代码，因为那段代码对反调试没什么用，看起来也不是特别稳定。改进好的代码：[https://github.com/wwh1004/antinet](https://github.com/wwh1004/antinet)。**
+**So I made some improvements to this code, adding the Win32 function to detect the debugger, adding the Hook detection for the internal CLR function, and removing the anti-analyzer code by the way, because that code is not very useful for anti- debugging and does not look particularly stable. Improved code: [https://github.com/wwh1004/antinet](https://github.com/wwh1004/antinet). **
 
-这里先贴一下sscli20的下载地址，因为文章分析时会用到sscli20，如果没有的可以从我这里下载。
+Here is the download address for sscli20, because sscli20 will be used in the article analysis, if not, you can download it from me.
 
-[百度云](https://pan.baidu.com/s/1WEORyUlymp1f-RLmHSeotQ)（提取码：v1w2）
+[Baidu Cloud](https://pan.baidu.com/s/1WEORyUlymp1f-RLmHSeotQ)（extraction code：v1w2）
 
 [OneDrive](https://1drv.ms/u/s!ApAHkNMXPkQYhvx1nouD-JwwBpRCaw)
 
-在看文章之前，请一定在vs中打开我修改过的antinet（上文有下载地址），否则可能会不清楚文章在写什么！！！
+Be sure to open my modified tantinet in VS (download address above) before reading the article, otherwise it may not be clear what the article is about!!!!
 
-## 0xd4d的AntiManagedDebugger
+## 0xd4d of AntiManagedDebugger
 
-### 大致流程
+### general flow
 
-这个是0xd4d的antinet的反调试类，我没做修改，直接保留下来了，然后加了注释。
+This is the antidebug class for 0xd4d's antinet, which I kept without modifications, and then added comments.
 
-我们先看看0xd4d是怎么解释AntiManagedDebugger的原理。
+Let's first look at how 0xd4d explains the principle of AntiManagedDebugger.
 
-打开[https://github.com/0xd4d/antinet](https://github.com/0xd4d/antinet)，找到“Anti-managed debugger”，下面的“Technical details”（技术细节）就是实现原理。我的翻译如下（非机翻）：
+Open [https://github.com/0xd4d/antinet](https://github.com/0xd4d/antinet) and find "Anti-managed debugger", the following "Technical details" is the implementation principle. My translation is as follows (not machine translation).
 
-> 在CLR启动的时候，CLR会创建一个调试器类的实例（类名为Debugger）。这个调试器类会创建一个DebuggerRCThread类的实例，这个实例表示.NET调试器线程。正常情况下，这个线程只会在CLR退出（对一般.NET程序来说就是进程结束）时候结束。为了让这个线程提前退出，我们要将DebuggerRCThread类的实例的“keep-looping”字段设置为0并且对它进行发送信号。
+> When CLR starts, CLR creates an instance of the debugger class (class named Debugger). This debugger class creates an instance of the DebuggerRCThread class, which represents the .NET debugger thread. Normally, this thread would only end when the CLR exits (which for normal .NET programs is process end). In order to exit this thread early, we want to set the "keep-looping" field of the DebuggerRCThread class instance to 0 and send a signal to it.
 > 
-> 这两个实例都保存在CLR的.data节。
+> Both instances are saved in the .data section of the CLR.
 > 
-> 为了找到有趣的DebuggerRCThread实例，我们必须扫描.data节来获取Debugger实例的指针。我先寻找Debugger的实例是因为这个类包含了当前进程的ID，这样更易于寻找。当我们发现可能是Debugger的实例的地方出现了一些Debugger类的特征，并且这个可能的实例在指定偏移上保存了当前进程的ID，我们获取这个类中的DebuggerRCThread实例。
+> In order to find interesting DebuggerRCThread instances, we must scan the .data section to get a pointer to the Debugger instance. I looked for the Debugger instance first because the class contains the ID of the current process, which makes it easier to find. When we find that some features of the Debugger class appear where the possible instance of Debugger might be, and that this possible instance holds the ID of the current process on the specified offset, we get the DebuggerRCThread instance of this class.
 > 
-> DebuggerRCThread类中有一个字段为指回Debugger实例的指针。如果这个指针和先前找到的Debugger实例一样，那么我们可以非常肯定我们已经找到了需要的2个实例。
+> There is a field in the DebuggerRCThread class that is a pointer back to the Debugger instance. If this pointer is the same as the previously found Debugger instance, then we can be pretty sure we have found the 2 instances we need.
 > 
-> 一旦我们有了DebuggerRCThread实例，将keep-looping字段设置为0并且发出信号让线程退出是没有什么价值的。
+> Once we have a DebuggerRCThread instance, there is little value in setting the keep-looping field to 0 and signaling the thread to quit.
 > 
-> 为防止调试器附加到当前进程，我们可以清除调试器IPC块的大小字段。如果这个大小字段的值被设置为其它数字了，mscordbi.dll中的CordbProcess::VerifyControlBlock()将返回一个错误代码，并且此时没有调试器能够附加当前进程了。
+> To prevent the debugger from attaching to the current process, we can clear the debugger IPC block size field. If the value of this size field is set to other numbers, mscordbi.dll in CordbProcess::VerifyControlBlock() will return an error code, and at this time no debugger can attach the current process.
 
-看不懂也没关系，大概有个印象就行。我们到vs里面看看AntiManagedDebugger类的代码。
+It doesn't matter if you can't read it, you can probably get an impression. Let's go inside VS and look at the code for the AntiManagedDebugger class.
 
 ![1](./1.png)
 ![2](./2.png)
 
-代码的意思和0xd4d自己解释的是完全一样的，可以相互对着看，这里就不说结束调试器线程的原理和思路了，我们来看看0xd4d操作的那些字段到底是什么。
+The meaning of the code and 0xd4d's own interpretation is exactly the same, can be seen against each other, here let's not talk about the principles and ideas of ending the debugger thread, let's see what exactly are those fields of 0xd4d operation.
 
-### 在CLR源码中了解更多
+### Learn more in the CLR Source Code
 
-如果我没记错，CoreCLR是在CLR v4.6分支上开源的。所以CLR v4.5及之后的CLR，CoreCLR都和它们相似，看CoreCLR的源码比IDA反编译好得多。但是CLR v4.0是介于CLR v2.0和CLR v4.5之间的，可以算是一个四不像，我们暂时不管，因为现在除了XP不能装.NET 4.5，其它系统都可以装，也几乎都装了最新的.NET Framework。
+If I remember correctly, CoreCLR is open source on the CLR v4.6 branch. So the CLR v4.5 and later, CoreCLR are similar to them, see CoreCLR source code is much better than IDA decompilation. But CLR v4.0 is between CLR v2.0 and CLR v4.5, which can be considered a four unlike, we do not care for the moment, because now except XP can not install .
 
-SSCLI20对应了CLR v2.0，也就是.NET 2.0~3.5。有些时候，看CLR v2.0的IDA反编译代码不如看SSCLI20的代码。
+SSCLI20 corresponds to CLR v2.0, which is .
 
-0xd4d不是提到了“keep-looping”字段么，我们在CoreCLR中找找，你会发现，其实找不到。
+0xd4d does not mention the "keep-looping" field, we look for it in CoreCLR, you will find, in fact, can not find.
 
 ![3](./3.png)
 
-是不是0xd4d说错了呢？或者CoreCLR不一样呢？当然不是，CLR这么大型的项目，很多地方不是想改就能改的。我们仔细在DebuggerRCThread类的声明中找找，可以看到有个字段叫做“m_run”，这个字段就是0xd4d所说的“keep-looping”字段。
+Could it be that 0xd4d is saying the wrong thing? Or is CoreCLR different? Of course not, with a project as large as CLR, many things can't be changed if you want to. We looked carefully in the declaration of DebuggerRCThread class, we can see a field called "m_run", this field is 0xd4d said "keep-looping" field.
 
 ![4](./4.png)
 
-既然已经找到“m_run”字段了，那我们再看看AntiManagedDebugger.Initialize()的注释“Signal debugger thread to exit”对应的语句是干嘛的。
+Now that we have found the "m_run" field, let's see what the comment "Signal debugger thread to exit" in AntiManagedDebugger.Initialize() does.
 
 ``` csharp
 // Signal debugger thread to exit
 *((byte*)pDebuggerRCThread + info.DebuggerRCThread_shouldKeepLooping) = 0;
 IntPtr hEvent = *(IntPtr*)((byte*)pDebuggerRCThread + info.DebuggerRCThread_hEvent1);
 SetEvent(hEvent);
-// 我添加的：
-// 以上三行代码是模拟DebuggerRCThread::AsyncStop()。
-// 把shouldKeepLooping设置为false会让已附加的调试器与被调试进程失去联系。
-// 据我测试，SetEvent是否执行都无所谓。
-// 不设置shouldKeepLooping为false，单独执行SetEvent也没有什么效果。
-// 但是为了完整模拟DebuggerRCThread::AsyncStop()，0xd4d还是把这3行代码都写上去了，我们也不做其它修改。
+// I added.：
+// The above three lines of code emulate DebuggerRCThread::AsyncStop().
+// Setting shouldKeepLooping to false will cause the attached debugger to lose contact with the process being debugged.
+// As far as I can test, it doesn't matter if SetEvent is executed or not.
+// Executing SetEvent on its own without setting shouldKeepLooping to false has little effect.
+// But to fully emulate DebuggerRCThread::AsyncStop(), 0xd4d wrote all 3 lines of code, and we didn't make any other changes.
 ```
 
-我们在CoreCLR中选择m_run字段，点“查找所有引用”，可以很快找到“HRESULT DebuggerRCThread::AsyncStop(void)”这个函数。
+We select the m_run field in CoreCLR, point "find all references", you can quickly find "HRESULT DebuggerRCThread::AsyncStop(void)" this function.
 
 ![5](./5.png)
 
-这样就弄明白了，这段代码是在模拟DebuggerRCThread::AsyncStop()，这个函数会被Debugger::StopDebugger()调用，所以可以达到结束已存在的调试器的目的。
+To figure it out, this code is simulating DebuggerRCThread::AsyncStop(), which is called by Debugger::StopDebugger(), so the purpose of ending an existing debugger can be achieved.
 
 ![6](./6.png)
 
-当然了，这不能阻止托管调试器重新附加到当前进程，所以我们要在这之前，先让托管调试器不能附加当前进程。这就是以下代码的意义了：
+Of course, this doesn't stop the managed debugger from re-attaching to the current process. That's the point of the following code.
 
 ``` csharp
 // This isn't needed but it will at least stop debuggers from attaching.
@@ -88,70 +88,70 @@ SetEvent(hEvent);
 // thread has exited. A user who tries to attach will be greeted with an
 // "unable to attach due to different versions etc" message. This will not stop
 // already attached debuggers. Killing the debugger thread will.
-// 翻译：
-// 这不是必须的，但是这至少可以阻止托管调试器附加进程。
-// 即使调试器附加成功，调试器也不会得到任何消息因为调试器线程已经退出。
-// 尝试附加调试器会得到一个CORDBG_E_DEBUGGING_NOT_POSSIBLE（"由于 CLR 实现内的不兼容，因此不可能进行调试。"）之类的消息。
-// 这（指的是把DebuggerIPCControlBlock的size字段设置为0）不能停止已附加的调试器。但是结束调试器线程可以停止已附加的调试器。
+// Translation.
+// It's not required, but it will at least stop the managed debugger attachment process.
+// Even if the debugger attachment is successful, the debugger will not get any message because the debugger thread has quit.
+// Attempting to attach a debugger will get a CORDBG_E_DEBUGGING_NOT_POSSIBLE ("Debugging is not possible due to incompatibility within the CLR implementation.") That kind of news.
+// This (referring to setting the size field of the DebuggerIPCControlBlock to 0) does not stop the attached debugger. But ending a debugger thread can stop an attached debugger.
 byte* pDebuggerIPCControlBlock = (byte*)*(IntPtr*)((byte*)pDebuggerRCThread + info.DebuggerRCThread_pDebuggerIPCControlBlock);
 if (Environment.Version.Major == 2)
-	// CLR 2.0下，这个是一个数组指针（DebuggerIPCControlBlock**），而CLR 4.0+是ebuggerIPCControlBlock*
+	// Under CLR 2.0, this is an array pointer (DebuggerIPCControlBlock**), while CLR 4.0+ is DebuggerIPCControlBlock*
 	pDebuggerIPCControlBlock = (byte*)*(IntPtr*)pDebuggerIPCControlBlock;
 // Set size field to 0. mscordbi!CordbProcess::VerifyControlBlock() will fail
 // when it detects an unknown size.
-// 翻译：
-// 把size字段设置为0，mscordbi!CordbProcess::VerifyControlBlock()会失败当它发现大小未知。
+// Translation.
+// Set the size field to 0, mscordbi!CordbProcess::VerifyControlBlock() will fail when it finds the size unknown.
 *(uint*)pDebuggerIPCControlBlock = 0;
-// 我添加的：
-// mscordbi!CordbProcess::VerifyControlBlock()会在附加调试器时被调用，所以size字段被设置为0之后，无法附加调试器
+// I added.
+// mscordbi!CordbProcess::VerifyControlBlock() will be called when attaching the debugger, so after the size field is set to 0, the debugger cannot be attached!
 ```
 
-我们在CoreCLR中直接转到CordbProcess::VerifyControlBlock()，看看到底有什么样的验证。
+We went straight to CordbProcess::VerifyControlBlock() in CoreCLR to see exactly what kind of validation there is.
 
 ![7](./7.png)
 ![8](./8.png)
 ![9](./9.png)
 
-我们再看看m_DCBSize到底被定义在了哪里，如何获取。
+Let's see again where exactly m_DCBSize is defined and how to get it.
 
 ![10](./10.png)
 ![11](./11.png)
 
-0xd4d的这段代码会判断当前是不是.NET 2.0~3.5，经过研究，我们可以通过SSCLI20发现一些原因。
+This code in 0xd4d will determine if it is currently .NET 2.0~3.5, after researching, we can find some reasons through SSCLI20.
 
-我们先打开SSCLI20的源码。到类视图中搜索DebuggerRCThread，找到字段m\_rgDCB，这个字段对应了之前的m\_pDCB，只不过多了一级指针。
+Let's open the source code for SSCLI20 first. Search DebuggerRCThread in class view and find the field m\_rgDCB, which corresponds to the previous m\_pDCB, but with one more pointer.
 
 ![12](./12.png)
 
-### 反反调试
+### debug sth. back and forth
 
-0xd4d的代码是通过内存来获取.data节的地址的，我们可以直接修改节头来达到反反调试的目的。
+0xd4d's code gets the address of the .data section through memory, we can directly modify the header of the section to achieve the purpose of anti-debugging.
 
 ![13](./13.png)
 ![14](./14.png)
 
-所以我们有很多方法过掉这种反反调试，比如：
-- 如果.data节不存在，直接退出进程，因为理论上来说.data节是一定存在的。
-- 直接从文件中读取.data节的RVA和Size，然后再到内存中扫描对应的位置。
-- 校验PE头有没有被修改，如果被修改了，直接退出进程。
+So we have a lot of ways to get past this back-and-forth debugging, like.
+- If the .data section does not exist, exit the process directly, as the .data section is theoretically certain to exist.
+- Read the RVA and Size of the .data section directly from the file, and then scan the corresponding location in memory.
+- Verify that the PE header has not been modified, and if it has been modified, exit the process directly.
 - ...
 
-其中校验PE头这个方法，是最有效的，为什么呢？既然我们不能直接删掉.data这个特征，那么我们可以伪造特征，伪造出一个假的节头，让AntiManagedDebugger修改到其它地方，而不是真正的DebuggerRCThread实例。如果我们确保PE头和文件中一致，那么我们就可以断定我们通过.data节找到DebuggerRCThread实例是真正的，有效的。
+One of the most effective ways to verify the PE head is this method, why? Since we can't just delete the .data feature, we can forge the feature to make a fake node header and have AntiManagedDebugger modify it to something other than the real DebuggerRCThread instance. If we make sure that the PE header is consistent with the file, then we can conclude that the DebuggerRCThread instance we found via the .data section is real and valid.
 
-这种反反调试的方法非常容易被再次检测到，所以我们可以直接修改所有引用了这个全局变量的地方么？答案是不行。我做过各种测试，比如直接复制对象，DllMain之前或者之后修改，都会导致调试器直接出问题。
+This anti-debugging approach is very easy to detect again, so can we just change all the references to this global variable? The answer is no. I've done all sorts of tests, such as directly copying objects, before or after DllMain modifications, that have caused direct problems with the debugger.
 
 ![15](./15.png)
 ![16](./16.png)
 
-这些代码是好早之前写的，也不想再去测试了，这种方法极其麻烦，还不如直接找到反调试的地方，把它Patch掉。
+The code was written a long time ago, and I don't want to test it anymore. This method is extremely cumbersome, so I might as well just find the anti-debugging place and patch it off.
 
-## 改进后的Antinet
+## Improved Antinet
 
 ### AntiPatcher
 
-既然0xd4d写的AntiManagedDebugger有一些小漏洞什么的，我们可以添加一个AntiPatcher类进行修复。
+Since the AntiManagedDebugger written by 0xd4d has some minor bugs or something, we can add an AntiPatcher class to fix it.
 
-这个AntiPatcher类要可以校验CLR模块的PE头有没有被修改。
+The AntiPatcher class should verify that the PE header of the CLR module has not been modified.
 
 ``` csharp
 private static void* _clrModuleHandle;
@@ -195,9 +195,9 @@ private static byte[] CopyPEHeader(void* pPEImage) {
 	fixed (byte* pPEHeader = peHeader) {
 		for (uint i = 0; i < length; i++)
 			pPEHeader[i] = ((byte*)pPEImage)[i];
-		// 复制PE头
+		// Copy PE head
 		*(void**)(pPEHeader + imageBaseOffset) = null;
-		// 清除可选头的ImageBase字段，这个字段会变化，不能用于校验
+		// Clears the ImageBase field of the optional header, which will change and cannot be used for checksum
 	}
 	return peHeader;
 }
@@ -213,31 +213,31 @@ private static void GetPEInfo(void* pPEImage, out uint imageBaseOffset, out uint
 	p += *(uint*)(p + 0x3C);
 	// NtHeader
 	p += 4 + 2;
-	// 跳过 Signature + Machine
+	// skip Signature + Machine
 	sectionsCount = *(ushort*)p;
 	p += 2 + 4 + 4 + 4;
-	// 跳过 NumberOfSections + TimeDateStamp + PointerToSymbolTable + NumberOfSymbols
+	// skip NumberOfSections + TimeDateStamp + PointerToSymbolTable + NumberOfSymbols
 	optionalHeaderSize = *(ushort*)p;
 	p += 2 + 2;
-	// 跳过 SizeOfOptionalHeader + Characteristics
+	// skip SizeOfOptionalHeader + Characteristics
 	isPE32 = *(ushort*)p == 0x010B;
 	imageBaseOffset = isPE32 ? (uint)(p + 0x1C - (byte*)pPEImage) : (uint)(p + 0x18 - (byte*)pPEImage);
 	p += optionalHeaderSize;
-	// 跳过 OptionalHeader
+	// skip OptionalHeader
 	pSectionHeaders = (void*)p;
 	length = (uint)((byte*)pSectionHeaders + 0x28 * sectionsCount - (byte*)pPEImage);
 }
 ```
 
-调用Initialize()，就可以从文件中获取CRC32。
+Call Initialize() to get CRC32 from the file.
 
-我们再写一个方法来验证内存中是不是这样的PE头。
+Let's write another method to verify if there is such a PE header in memory.
 
 ``` csharp
 /// <summary>
-/// 检查CLR模块的PE头是否被修改
+/// Check if the PE header of the CLR module has been modified
 /// </summary>
-/// <returns>如果被修改，返回 <see langword="true"/></returns>
+/// <returns> If modified, return <see langword="true"/></returns>
 public static bool VerifyClrPEHeader() {
 	return DynamicCrc32.Compute(CopyPEHeader(_clrModuleHandle)) != _clrPEHeaderCrc32Original;
 }
@@ -245,13 +245,13 @@ public static bool VerifyClrPEHeader() {
 
 ### AntiDebugger
 
-首先，这个类要有原来的AntiManagedDebugger的功能，所以我们不删除AntiManagedDebugger类，直接对这个类做一个包装。
+First of all, this class should have the functionality of the original AntiManagedDebugger, so we don't remove the AntiManagedDebugger class, and directly make a wrapper for this class.
 
 ``` csharp
 private static bool _isManagedDebuggerPrevented;
 
 /// <summary>
-/// 阻止托管调试器调试当前进程。
+/// Prevent the managed debugger from debugging the current process。
 /// </summary>
 /// <returns></returns>
 public static bool PreventManagedDebugger() {
@@ -262,26 +262,26 @@ public static bool PreventManagedDebugger() {
 }
 ```
 
-然后我们添加一个检测非托管与托管调试器的方法。
+We then add a method for detecting unmanaged vs. managed debuggers.
 
 ``` csharp
 /// <summary>
-/// 检查是否存在任意类型调试器。
+/// Check if any type of debugger exists.。
 /// </summary>
 /// <returns></returns>
 public static bool HasDebugger() {
 	return HasUnmanagedDebugger() || HasManagedDebugger();
-	// 检查是否存在非托管调试器的速度更快，效率更高，在CLR40下也能检测到托管调试器。
+	// Checking for the presence of unmanaged debuggers is faster and more efficient, and managed debuggers can be detected under CLR40.
 }
 ```
 
-HasUnmanagedDebugger的实现很简单，我们把xjun的XAntiDebug的syscall部分删掉就行。syscall利用漏洞的那部分改成C#代码要些时间，暂时没弄，以后有时间了再弄。毕竟非托管调试器调试.NET程序是极其痛苦的，我们的Anti目标应该主要是dnSpy等托管调试器。
+HasUnmanagedDebugger implementation is very simple, we will xjun XAntiDebug syscall part of the delete on the line. syscall use the vulnerability of that part into C# code to take some time, for the time being did not do, and then have time to do again. After all, unmanaged debuggers debugging .NET programs are extremely painful, and our Anti targets should be primarily hosted debuggers like dnSpy.
 
 ``` csharp
 /// <summary>
-/// 检查是否存在非托管调试器。
-/// 在CLR20下，使用托管调试器调试进程，此方法返回 <see langword="false"/>，因为CLR20没有使用正常调试流程，Win32函数检测不到调试器。
-/// 在CLR40下，使用托管调试器调试进程，此方法返回 <see langword="true"/>。
+/// Check for the presence of unmanaged debuggers.
+/// Under CLR20, use the managed debugger to debug the process, this method returns <see langword="false"/> because CLR20 does not use the normal debugging process and the Win32 function cannot detect the debugger.
+/// Use the managed debugger to debug the process under CLR40, this method returns <see langword="true"/>.
 /// </summary>
 /// <returns></returns>
 public static bool HasUnmanagedDebugger() {
@@ -303,12 +303,12 @@ public static bool HasUnmanagedDebugger() {
 }
 ```
 
-接下来是HasManagedDebugger()的实现了，这个才是重头戏。检测托管调试器最有效方便的手段是调用Debugger.IsAttached，可惜这个太容易被修改了，我们检测是否被修改就行。一个好消息是Debugger.IsAttached的实现其实在CLR内部，而且还是一个[MethodImpl(MethodImplOptions.InternalCall)]，意思是这个方法的本机代码地址就是CLR模块中某个函数的地址。至于为什么是这样，不是本文重点，这里不做解释，可以自己研究CoreCLR。
+Next came the implementation of HasManagedDebugger(), and this was the big one. The most effective and convenient way to detect the hosted debugger is to call Debugger.IsAttached, unfortunately this is too easy to modify, we just need to detect if it is modified. The good news is that the implementation of Debugger.IsAttached is actually inside the CLR and is also a [MethodImpl(MethodImplOptions.InternalCall)], meaning that the native code address of this method is the address of a function in the CLR module. As to why this is so, not the focus of this article, no explanation here, can research CoreCLR for yourself.
 
 ![17](./17.png)
 ![18](./18.png)
 
-我们添加初始化代码，直接从clr.dll/mscorwks.dll读取原始的代码，并且计算出CRC32。
+We add the initialization code, read the original code directly from clr.dll/mscorwks.dll, and calculate CRC32.
 
 ``` csharp
 private delegate bool IsDebuggerAttachedDelegate();
@@ -330,13 +330,13 @@ private static void InitializeManaged() {
 	switch (Environment.Version.Major) {
 	case 2:
 		_pIsDebuggerAttached = (byte*)typeof(Debugger).GetMethod("IsDebuggerAttached", BindingFlags.NonPublic | BindingFlags.Static).MethodHandle.GetFunctionPointer();
-		// 和.NET 4.x不一样，这个Debugger.IsAttached的get属性调用了IsDebuggerAttached()，而不是直通CLR内部。
+		// Unlike .NET 4.x, this Debugger.IsAttached get attribute calls IsDebuggerAttached(), not straight inside the CLR.
 		clrModuleHandle = GetModuleHandle("mscorwks.dll");
 		break;
 	case 4:
 		_pIsDebuggerAttached = (byte*)typeof(Debugger).GetMethod("get_IsAttached").MethodHandle.GetFunctionPointer();
-		// Debugger.IsAttached的get属性是一个有[MethodImpl(MethodImplOptions.InternalCall)]特性的方法，意思是实现在CLR内部，而且没有任何stub，直接指向CLR内部。
-		// 通过x64dbg调试，可以知道Debugger.get_IsAttached()对应clr!DebugDebugger::IsDebuggerAttached()。
+		// Debugger.IsAttached's get property is a method with [MethodImpl(MethodImplOptions.InternalCall)] properties, meaning that the implementation is inside the CLR and there is no stub that points directly inside the CLR.
+		// With x64dbg debugging, it is known that Debugger.get_IsAttached() corresponds to clr!DebugDebugger::IsDebuggerAttached().
 		clrModuleHandle = GetModuleHandle("clr.dll");
 		break;
 	default:
@@ -349,7 +349,7 @@ private static void InitializeManaged() {
 	if (!GetModuleFileName(clrModuleHandle, stringBuilder, MAX_PATH))
 		throw new InvalidOperationException();
 	clrFile = File.ReadAllBytes(stringBuilder.ToString());
-	// 读取CLR模块文件内容
+	// Read the contents of the CLR module file
 	fixed (byte* pPEImage = clrFile) {
 		PEInfo peInfo;
 		uint isDebuggerAttachedRva;
@@ -367,7 +367,7 @@ private static void InitializeManaged() {
 		pCodeCurrent = pCodeStart;
 		is64Bit = sizeof(void*) == 8;
 		opcodes = new byte[0x200];
-		// 分配远大于实际函数大小的内存
+		// Allocate memory that is much larger than the actual function size
 		while (true) {
 			uint length;
 
@@ -376,13 +376,13 @@ private static void InitializeManaged() {
 				throw new NotSupportedException();
 			CopyOpcode(&ldasmData, pCodeCurrent, opcodes, (uint)(pCodeCurrent - pCodeStart));
 			if (*pCodeCurrent == 0xC3) {
-				// 找到了第一个ret指令
+				// First ret command found.
 				pCodeCurrent += length;
 				break;
 			}
 			pCodeCurrent += length;
 		}
-		// 复制Opcode直到出现第一个ret
+		// Copy Opcode until the first ret appears.
 		_isDebuggerAttachedLength = (uint)(pCodeCurrent - pCodeStart);
 		fixed (byte* pOpcodes = opcodes)
 			_isDebuggerAttachedCrc32 = DynamicCrc32.Compute(pOpcodes, _isDebuggerAttachedLength);
@@ -396,7 +396,7 @@ private static void CopyOpcode(ldasm_data* pLdasmData, void* pCode, byte[] opcod
 }
 ```
 
-这里使用了Ldasm，也是看了xjun的XAntiDebug的项目才知道有这个反汇编引擎。这个反编译引擎非常小巧，真的只有1个函数，我把我翻译成的C#的代码附上。
+Ldasm was used here, and it was also after looking at xjun's XAntiDebug project that I learned about the disassembly engine. The decompile engine is very small, really only has 1 function, and I've attached the code I translated into C#.
 
 ``` csharp
 /// <summary>
@@ -566,14 +566,14 @@ public static uint ldasm(void* code, ldasm_data* ld, bool is64) {
 }
 ```
 
-还有一堆定义可以自己去我改好的antinet里面看，这里不贴了。
+There are also a bunch of definitions that you can read for yourself in my modified antinet, which will not be posted here.
 
-此时，我们可以添加上检查是否存在托管调试器的代码。
+At this point, we can add code to check if a hosted debugger exists.
 
 ``` csharp
 /// <summary>
-/// 使用 clr!DebugDebugger::IsDebuggerAttached() 检查是否存在托管调试器。
-/// 注意，此方法不能检测到非托管调试器（如OllyDbg，x64dbg）的存在。
+/// Use clr!DebugDebugger::IsDebuggerAttached() to check if a hosted debugger exists.
+/// Note that this method does not detect the presence of unmanaged debuggers (such as OllyDbg, x64dbg).
 /// </summary>
 /// <returns></returns>
 public static bool HasManagedDebugger() {
@@ -586,13 +586,13 @@ public static bool HasManagedDebugger() {
 
 	InitializeManaged();
 	if (_isDebuggerAttached())
-		// 此时肯定有托管调试器附加
+		// There must be a hosted debugger attached at this point.
 		return true;
-	// 此时不能保证托管调试器未调试当前进程
+	// There is no guarantee that the managed debugger is not debugging the current process
 	if (_pIsDebuggerAttached[0] == 0x33 && _pIsDebuggerAttached[1] == 0xC0 && _pIsDebuggerAttached[2] == 0xC3)
-		// 这是dnSpy反反调试的特征
+		// This is a feature of dnSpy's anti-debugging
 		return true;
-	// 有可能特征变了，进一步校验
+	// Possible feature change, further verification
 	opcodes = new byte[_isDebuggerAttachedLength];
 	pCodeStart = _pIsDebuggerAttached;
 	pCodeCurrent = pCodeStart;
@@ -609,34 +609,34 @@ public static bool HasManagedDebugger() {
 		if (pCodeCurrent == pCodeEnd)
 			break;
 	}
-	// 复制Opcodes
-	if (DynamicCrc32.Compute(opcodes) != _isDebuggerAttachedCrc32)
-		// 如果CRC32不相等，那说明CLR可能被Patch了
+	// Reproduce Opcodes
+	if (DynamicCrc32.Compute(opcodes) ! = _isDebuggerAttachedCrc32)
+		// If CRC32 is not equal, then CLR may have been patched
 		return true;
 	return false;
 }
 ```
 
-也许有人会问为什么不直接把机器码复制到缓冲区来校验，而是只取其中的Opcode。因为我们要考虑到重定位表的存在，所以只能检测Opcode是否被修改，要检测操作数有没有被修改，实现起来就有点麻烦了。
+Some may ask why we don't just copy the machine code to the buffer to verify it, but only take the Opcode in it, because we have to take into account the existence of the repositioning table, so we can only detect if the Opcode has been modified, and to detect if the operands have been modified, the implementation is a bit of a problem.
 
-之前考虑过对整个CLR的.text节进行校验，但是失败了。这部分代码可以去github看我的提交记录，最先几次提交里面有这部分代码，在[AntiPatcher.cs](https://github.com/wwh1004/antinet/blob/a030b2fae495154391c50bac7a1712d2be59fc23/antinet/AntiPatcher.cs)里面，只不过因为失败被注释掉了。
+Previously it was considered to verify the entire .text section of the CLR, but it failed. This part of the code can be found in my submission history at github, the first few submissions have it in [AntiPatcher.cs](https://github.com/wwh1004/antinet/blob/a030b2fae495154391c50bac7a1712d2be59fc23/antinet/AntiPatcher.cs), only it was commented out because it failed.
 
-为什么用
+Why use.
 
 ``` csharp
 if (_isDebuggerAttached())
-	// 此时肯定有托管调试器附加
+	// There must be a hosted debugger attached at this point.
 	return true;
 ```
 
-而不是
+Instead.
 
 ``` csharp
 if (Debugger.IsAttched)
-	// 此时肯定有托管调试器附加
+	// There must be a hosted debugger attached at this point.
 	return true;
 ```
 
-因为.NET 2.0~3.5的Debugger.IsAttched的get属性是一个托管方法，存在被直接Patch的可能，会导致在.NET 2.0~3.5下，托管调试器的检测出现漏洞。
+Because the get attribute of Debugger.IsAttched in .NET 2.0~3.5 is a hosted method, there is the possibility of being directly patched, which can lead to vulnerabilities in the detection of hosted debuggers under .
 
 ![19](./19.png)
