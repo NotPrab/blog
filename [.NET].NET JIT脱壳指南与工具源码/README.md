@@ -1,217 +1,217 @@
-# .NET JIT脱壳指南与工具源码
+# .NET JIT shelling guide and tool source code
 
-## 前言
+## Foreword
 
-JIT脱壳可能对很多人来说是很难的，因为网上没有特别多的介绍，有的工具源码也仅限于yck1509（ConfuserEx作者）的jitDumper3和基于这个工具的CodeCracker修改的ManagedJiter和DNGuard_HVM_Unpacker，然后还有CodeCracker自己写的Simple_MSIL_Decryptor（很不稳定）。
+JIT unpacking may be difficult for many people, because there is not much introduction on the Internet, and some tool source code is limited to jitDumper3 of yck1509 (author of ConfuserEx) and ManagedJiter and DNGuard_HVM_Unpacker modified by CodeCracker based on this tool There is Simple_MSIL_Decryptor (very unstable) written by CodeCracker himself.
 
-要研究JIT脱壳需要先了解clr源码。对于.NET 2.0~3.5可以看IDA反编译mscorwks.dll和mscorjit.dll或者是看SSCLI的源码，对于.NET 4.0+可以看coreclr的源码。如果我没记错，coreclr是.NET 4.6分支出来的。
+To study JIT unpacking, you need to understand the clr source code. For .NET 2.0 ~ 3.5, you can see IDA decompile mscorwks.dll and mscorjit.dll or the source code of SSCLI. For .NET 4.0+, you can see the source code of coreclr. If I remember correctly, coreclr was forked from .NET 4.6.
 
-.NET可以说有3个大版本，分别是.NET 2.0 .NET 4.0 .NET 4.5，这3个版本的clr有很大变化。.NET 2.0的clr名称是mscorwks.dll，jit名称是mscorjit.dll。.NET 4.0的clr名称变成了clr.dll，jit名称变成了clrjit.dll，还有少量的clr和jit内部结构体的变化。.NET 4.5的clr名称和jit名称与.NET 4.0的相同，但是内部结构体有巨大变化，最明显的是clr提供给jit编译所需信息的接口ICorJitInfo的虚表结构和函数的定义，与.NET 4.0的完全不一样。所以CodeCracker发布的几个工具要用NetBox或者虚拟机安装.NET 4.0来运行，CodeCracker的那几个工具不支持.NET 4.5+。
+.NET can be said to have 3 major versions, respectively .NET 2.0 .NET 4.0 .NET 4.5, these three versions of clr have changed a lot. The clr name of .NET 2.0 is mscorwks.dll, and the jit name is mscorjit.dll. In .NET 4.0, the clr name becomes clr.dll, the jit name becomes clrjit.dll, and there are a few changes in clr and jit internal structures. The .NET 4.5 clr name and jit name are the same as .NET 4.0, but the internal structure has changed a lot. The most obvious is the definition of the virtual table structure and function of the interface ICorJitInfo provided by clr to the jit compilation information NET 4.0 is completely different. Therefore, several tools released by CodeCracker need to be installed with NetBox or virtual machine to run .NET 4.0. Those tools of CodeCracker do not support .NET 4.5+.
 
-**本文要介绍的内容在.NET 2.0~4.72都是正确的，最新出的.NET 4.8有些变化，但是我没去看有什么变化，所以本文不讨论.NET 4.8。**我的工具运行不了，我也懒得去修改我的工具了。源码在文章后半部分会贴出，好早之前就上传到github了，一直没写使用说明。
+** The content to be introduced in this article is correct in .NET 2.0 ~ 4.72. There are some changes in the latest .NET 4.8, but I did not go to see any changes, so this article does not discuss .NET 4.8. ** My tool won't work, and I'm too lazy to modify my tool. The source code will be posted in the second half of the article. It was uploaded to github a long time ago, and no instructions have been written.
 
-## CLR与JIT简介
+## Introduction to CLR and JIT
 
-这个部分我推荐看coreclr的文档 [Book of the Runtime](https://github.com/dotnet/coreclr/blob/master/Documentation/botr/README.md) ，非常不错的资料，对CLR任何版本都是适用的，我就没必要重复啰嗦一遍了。
+In this part, I recommend reading the coreclr documentation [Book of the Runtime] (https://github.com/dotnet/coreclr/blob/master/Documentation/botr/README.md), very good information, for any version of CLR Yes, I do n’t need to repeat it.
 
-## JIT编译流程
+## JIT compilation process
 
-这个东西应该是非常重要的，必须要了解的，不然文章很多地方会看不懂，那些脱壳机的源码也会看不懂。这里依然推荐看coreclr的文档，[RyuJIT Ooverview](https://github.com/dotnet/coreclr/blob/master/Documentation/botr/ryujit-overview.md) 虽然RyuJIT是.NET 4.5还是.NET 4.6才有的，但是老版本的JIT的编译流程还是几乎相同的。
+This thing should be very important and must be understood, otherwise the article will not understand in many places, and the source code of the shelling machine will not understand. Here is still recommended to see the coreclr documentation, [RyuJIT Ooverview] (https://github.com/dotnet/coreclr/blob/master/Documentation/botr/ryujit-overview.md) Although RyuJIT is .NET 4.5 or .NET 4.6 only Yes, but the compilation process of the old version of JIT is almost the same.
 
-[Phases of RyuJIT](https://github.com/dotnet/coreclr/blob/master/Documentation/botr/ryujit-overview.md#phases-of-ryujit) 看不懂可以直接机翻，虽然有好多流程，但是实际上要了解的只有 Pre-import 和 Importation 这2个阶段，这2个阶段还会调用ICorJitInfo接口，我们要研究的就是这个接口。
+[Phases of RyuJIT] (https://github.com/dotnet/coreclr/blob/master/Documentation/botr/ryujit-overview.md#phases-of-ryujit) If you do n’t understand it, you can turn it directly, although there are many processes However, the only two stages to be understood are the Pre-import and Importation stages. These two stages will also call the ICorJitInfo interface, which is what we want to study.
 
-### 从DoPrestub到compileMethod
+### From DoPrestub to compileMethod
 
-现在我们可以打开coreclr源码，找到 MethodDesc::DoPrestub 。CLR会为每个方法生成一个stub，stub最终都会跳转到MethodDesc::DoPrestub，由MethodDesc::DoPrestub调用JIT编译器。在编译之前，MethodDesc::DoPrestub会进行参数检查，并且判断方法类型，其中包括泛型方法的泛型参数检测。
+Now we can open the coreclr source code and find MethodDesc :: DoPrestub. The CLR will generate a stub for each method, and the stub will eventually jump to MethodDesc :: DoPrestub, which calls the JIT compiler from MethodDesc :: DoPrestub. Before compilation, MethodDesc :: DoPrestub will check the parameters and determine the method type, including the detection of generic parameters of generic methods.
 
 ![Alt text](./1.png)
 
-最终，DoPrestub会转到jit的导出函数compileMethod，在coreclr里面也找得到对应的代码 CILJit::compileMethod
+Eventually, DoPrestub will go to the compileMethod of jit's export function, and the corresponding code CILJit :: compileMethod can also be found in coreclr
 
 ![Alt text](./2.png)
 
-可以说所有的壳，都是通过Hook ICorJitCompiler虚表来进行jit解密的，没有例外。
+It can be said that all shells are decrypted through the Hook ICorJitCompiler virtual table without exception.
 
-可能有人会问为什么不Hook更底层的函数，比如jitNativeCode，Compiler::compCompile等等，原因还是很简单，Inline Hook这些函数很麻烦。寻找这些函数的地址还要通过特征匹配，如果JIT有点变动，特征就变了，就会出现匹配失败，这也是CodeCracker的脱壳机不能在.NET 4.5+运行的原因之一。
+Some people may ask why not Hook lower-level functions, such as jitNativeCode, Compiler :: compCompile, etc. The reason is still very simple, Inline Hook these functions are very troublesome. Finding the addresses of these functions must also be matched by features. If the JIT changes a bit, the features will change, and matching will fail. This is one of the reasons why CodeCracker's sheller cannot run on .NET 4.5+.
 
-可能还有人会问Hook这么浅层的导出函数，会不会出现不安全的情况，答案是不会的，因为有些壳同时自己实现了ICorJitInfo接口，在ICorJitInfo接口内进行解密操作。直接dump到的IL是对的，但是IL中的token会是加密的。所以脱壳机Hook更底层的Compiler::compCompile和网上说的Hook更底层的函数来解密是没有什么依据的，Hook哪一层函数都是一样的，dump到的IL不会变，token永远是加密的，解密操作还在更底层进行，并且解密之后不会还原到IL里面！！！
+Some people may ask Hook such a shallow export function, will there be an unsafe situation, the answer is no, because some shells also implement the ICorJitInfo interface, and decrypt the ICorJitInfo interface. The IL directly dumped is correct, but the token in the IL will be encrypted. Therefore, there is no basis for the decryption of the lower level Compiler :: compCompile of the shelling machine and the Hook lower level function on the Internet. The function of the Hook layer is the same, the IL to the dump will not change, the token is always Encrypted and decrypted operations are still performed at a lower level, and will not be restored to IL after decryption! ! !
 
-CILJit::compileMethod不会执行实际的编译，它会调用jitNativeCode，由jitNativeCode实例化Compiler类。实际上jitNativeCode也是一个包装，负责调用Compiler::compCompile。
+CILJit :: compileMethod will not perform the actual compilation, it will call jitNativeCode and the Compiler class will be instantiated by jitNativeCode. In fact, jitNativeCode is also a wrapper responsible for calling Compiler :: compCompile.
 
 ![Alt text](./3.png)
 
-### JIT内部
+### Inside JIT
 
-先贴张JIT流程图，看不懂的可以对着这个看看。
+First post the JIT flow chart, if you don't understand it, you can look at this.
 
 ![Alt text](./ryujit-ir-overview.png)
 
-Compiler::compCompile有2个重载方法，我们从最表层的说起。
+Compiler :: compCompile has two overloaded methods, let's start with the most superficial.
 
 ![Alt text](./4.png)
 
-这个是jitNativeCode会调用的。CodeCracker的那个脱壳机通过hook jitNativeCode中call Compiler::compCompile来达到hook Compiler::compCompile的效果，在这里进行dump IL。
+This is what jitNativeCode will call. CodeCracker's shelling machine achieves the effect of hook Compiler :: compCompile by calling Compiler :: compCompile in hook jitNativeCode, and dump IL is performed here.
 
-这个Compiler::compCompile依然是个包装，没有实际执行的部分。
+The Compiler :: compCompile is still a wrapper, and there is no actual implementation.
 
 ![Alt text](./5.png)
 
-接下来是这个函数调用的Compiler::compCompileHelper，这个函数会初始化一些信息，EHcount是异常处理子句数量，maxStack是栈元素最大数量。
+Next is Compiler :: compCompileHelper called by this function. This function initializes some information, EHcount is the number of exception handling clauses, and maxStack is the maximum number of stack elements.
 
 ![Alt text](./6.png)
 
-接下来是局部变量表初始化。
+Next is the local variable table initialization.
 
 ![Alt text](./7.png)
 
 ![Alt text](./8.png)
 
-这个locals是局部变量信息，对应的结构体是CORINFO_SIG_INFO。
+The locals are local variable information, and the corresponding structure is CORINFO_SIG_INFO.
 
 ![Alt text](./9.png)
 
-其中的字段pSig指向了#Blob堆中的LocalSig。脱壳机可以通过这个来dump局部变量签名。当然，壳也可以直接抹掉这个LocalSig，通过ICorJitInfo这个接口来给jit提供局部变量信息，因为jit也是使用ICorJitInfo这个接口来获取局部变量信息，而不是直接解析CORINFO_SIG_INFO.pSig。所以一些情况下dump pSig得到的局部变量签名是无效的，要如何解密或者dump，这个大家自己研究了，我就不透露那么多了。
+The field pSig points to LocalSig in the #Blob heap. The sheller can use this to dump local variable signatures. Of course, the shell can also directly erase the LocalSig, and provide local variable information to jit through the interface of ICorJitInfo, because jit also uses the interface of ICorJitInfo to obtain local variable information, rather than directly parse CORINFO_SIG_INFO.pSig. So in some cases, the local variable signature obtained by dump pSig is invalid. How to decrypt or dump it? Everyone has studied it by myself, and I will not disclose that much.
 
-现在我们回到Compiler::compCompileHelper，继续探究编译流程。我们可以看到调用了fgFindBasicBlocks这个函数
+Now we return to Compiler :: compCompileHelper and continue to explore the compilation process. We can see that the function fgFindBasicBlocks is called
 
 ![Alt text](./10.png)
 
 ![Alt text](./11.png)
 
-fgFindBasicBlocks是生成基本块的入口函数，和我那个控制流分析类库一样，要生成基本块才能继续分析。这个函数会调用ICorJitInfo::getEHinfo来获取异常处理子句的信息。
+fgFindBasicBlocks is the entry function for generating basic blocks. Like my control flow analysis library, the basic blocks must be generated to continue the analysis. This function will call ICorJitInfo :: getEHinfo to get information about the exception handling clause.
 
 ![Alt text](./12.png)
 
-这个CORINFO_EH_CLAUSE结构体也是我们脱壳需要的。
+This CORINFO_EH_CLAUSE structure is also what we need for shelling.
 
 ![Alt text](./13.png)
 
-现在，我们获取了解密方法体需要的3大信息，IL代码，局部变量，异常处理子句。但是还记得我在前面说过IL指令中如果操作数是token，token是加密的吗？是的，所以我们要继续深入JIT。
+Now, we have obtained the three major information required by the decryption method body, IL code, local variables, and exception handling clauses. But remember I said earlier that if the operand is a token in the IL instruction, the token is encrypted? Yes, so we have to go deeper into JIT.
 
-我们应该来到importer.cpp，这里JIT会通过ICorJitInfo把IL指令转化为GenTree，其中token需要转化为JIT内部定义，所以token是不会被还原到IL代码里的，需要自写代码解密并还原。
+We should come to importer.cpp, where JIT will convert the IL instruction to GenTree through ICorJitInfo, where the token needs to be converted into the JIT internal definition, so the token will not be restored into the IL code, and the self-written code needs to be decrypted and restored.
 
 ![Alt text](./14.png)
 
-这个是.NET 4.5+的token相关函数，.NET 4.5+引入了CORINFO_RESOLVED_TOKEN这个结构体，coreclr也用的这个结构体，里面的token就是IL指令中操作数的token，在.NET 2.0~3.5 .NET 4.0的时候还有个embedGenericHandle用来获取token。这个函数是CodeCracker的脱壳机用来解密token的。
+This is the token-related function of .NET 4.5+. NET 4.5+ introduces the CORINFO_RESOLVED_TOKEN structure, which is also used by coreclr. The token inside is the token of the operand in the IL instruction. In .NET 2.0 ~ 3.5 .NET In 4.0, there is also an embedGenericHandle for obtaining tokens. This function is used by CodeCracker's sheller to decrypt the token.
 
 ![Alt text](./15.png)
 
-整个JIT编译流程，我们就算了解完毕了。
+We understand the entire JIT compilation process.
 
 ## JitUnpacker
 
-这个是我和画眉一起写的一个脱壳机，去年9月份左右开写的，现在已经开源了整个框架，去掉了脱DNG和其它一些壳的代码，只留下了通用的脱壳部分。所以叫JitUnpacker-Framework更合适，GitHub：[JitUnpacker-Framework](https://github.com/wwh1004/JitUnpacker-Framework) 一次性开源后我不会继续维护这个仓库，仅供研究使用，注意！！！
+This is a shelling machine that I wrote with Thrush. It was written around September last year. Now the entire framework has been open sourced. The code to remove DNG and other shells has been removed, leaving only the general shelling part. So it is more appropriate to call it JitUnpacker-Framework, GitHub: [JitUnpacker-Framework] (https://github.com/wwh1004/JitUnpacker-Framework) I will not continue to maintain this warehouse after a one-time open source, only for research use, pay attention! ! !
 
-如果要研究JIT脱壳，我还是非常推荐先看我的这个开源版本JitUnpacker的代码，这个JitUnpacker支持.NET 2.0~3.5 .NET 4.0~4.72（不支持.NET 4.8，我没安装.NET 4.8，所以没做支持）。而且结构体定义全部是正确的，关键地方的注释都有。CodeCracker的那个脱壳机代码太乱了，而且对泛型支持，值类型支持不太好，最关键的是结构体定义是错的，部分代码也是错的，会误导人。
+If you want to study JIT unpacking, I still highly recommend looking at the code of my open source version of JitUnpacker first. This JitUnpacker supports .NET 2.0 ~ 3.5 .NET 4.0 ~ 4.72 (.NET 4.8 is not supported, I did not install .NET 4.8, so No support). And the structure definitions are all correct, with comments in key places. CodeCracker's sheller code is too messy, and support for generics and value types is not very good. The most important thing is that the structure definition is wrong, and part of the code is wrong, which will mislead people.
 
-### 简介
+### Introduction
 
-整个脱壳机有2大部分。
+The whole shelling machine has 2 parts.
 
 ![Alt text](./16.png)
 
-第一个是文件夹Runtime里面的内容，第二个是Unpackers文件夹里面的内容。
+The first is the content in the folder Runtime, and the second is the content in the Unpackers folder.
 
-Runtime提供了运行时相关信息，比如DoPrestub的包装，JitHook的接口之类的。
+Runtime provides runtime related information, such as DoPrestub packaging, JitHook interface and the like.
 
-Unpackers是脱壳逻辑的代码，实现IMethodDumper IUnpacker IUnpackerDetector这三个接口就可以了。Unknown文件夹是和de4dot参数-p un类似的东西，可以处理没反脱壳的壳。
+Unpackers is the code of the unpacking logic, it is enough to implement the three interfaces of IMethodDumper IUnpacker IUnpackerDetector. The Unknown folder is something similar to the de4dot parameter -p un, which can handle shells that have not been unhulled.
 
 ### Runtime
 
-这个是CORINFO_METHOD_INFO的包装，因为CORINFO_METHOD_INFO结构体在.NET 2.0和.NET 4.0+有区别，所以有个包装。
+This is the packaging of CORINFO_METHOD_INFO, because the CORINFO_METHOD_INFO structure is different in .NET 2.0 and .NET 4.0+, so there is a packaging.
 
 ![Alt text](./17.png)
 
-这个是JitHook的接口，实现这个接口，为IMethodDumper提供所需信息即可。目前已经内置了CodeCracker脱壳机的hook方式（准确的说是yck1509的，CodeCracker只是做了些修改）和compileMethod虚表hook方式。
+This is the interface of JitHook. Implement this interface to provide the required information for IMethodDumper. At present, the hooking method of the CodeCracker shelling machine (accurately yck1509, CodeCracker only made some modifications) and the compileMethod virtual table hooking method have been built in.
 
 ![Alt text](./18.png)
 
 ![Alt text](./19.png)
 
-由于值类型的存在，所以有了UnboxingStub，对比方法句柄的时候，我们不能直接对比，需要这样。
+Because of the existence of the value type, with UnboxingStub, when comparing method handles, we can't directly compare, we need this.
 
 ![Alt text](./20.png)
 
-接下来是RuntimePatcher，首先要patch的是canInline，如果不patch这里，让一些方法被内联编译，脱壳会出错。然后还有类静态构造器的检测，编译方法的时候DoPrestub会检查类静态构造器有没有运行过，如果没运行，CLR会先运行类静态构造器，导致运行我们脱壳机之外的代码。最后一个patch的地方是泛型检测，DoPrestub会检测泛型参数，如果没有泛型参数，会禁止编译。
+Next is RuntimePatcher. The first thing to patch is canInline. If you do n’t patch it here, let some methods be compiled inline and the shell will be wrong. Then there is the detection of the class static constructor. When compiling the method, DoPrestub will check whether the class static constructor has been run. If it has not been run, the CLR will first run the class static constructor, causing the code outside of our sheller to run. The last patch is generic detection, DoPrestub will detect generic parameters, if there are no generic parameters, it will prohibit compilation.
 
 ![Alt text](./21.png)
 
-类静态构造器运行检测的代码没在coreclr里面找到，就不贴了。下面是泛型参数检测。
+The code for running detection of static constructor is not found in coreclr, so it will not be posted. The following is a generic parameter detection.
 
 ![Alt text](./22.png)
 
-### 其它
+### other
 
-这里就是些杂七杂八的东西了。首先要提一下的是LoadMethodHandles，CodeCracker的代码里面会特别处理泛型，但是那个是错的。
+Here are some miscellaneous things. The first thing to mention is LoadMethodHandles. CodeCracker's code will handle generics in particular, but that is wrong.
 
 我直接调用ResolveMethodHandle。
 
 ![Alt text](./23.png)
 
-CodeCracker打算实例化泛型方法，但是其实这是没用的，我特意去看了coreclr源码，也做过测试，这样得到的方法句柄是和直接调用ResolveMethodHandle得到的一样的。
+CodeCracker intends to instantiate generic methods, but in fact this is useless. I specifically looked at the coreclr source code and tested it. The method handle obtained in this way is the same as that obtained by directly calling ResolveMethodHandle.
 
 ![Alt text](./24.png)
 
-第二个要提的是CLR内部的UnboxingStub，在处理值类型的方法的时候，CLR会生成这个，如果直接DoPrestub，CLR是不会让JIT编译这个方法的，要调用GetWrappedMethodDesc，用这个返回值给DoPrestub才能触发JIT。
+The second thing to mention is the UnboxingStub inside the CLR. The CLR will generate this when processing the value type method. If you directly DoPrestub, the CLR will not let the JIT compile this method. You must call GetWrappedMethodDesc and use this return value to DoPrestub can trigger JIT.
 
 ![Alt text](./25.png)
 
-CodeCracker的处理方法是直接Invoke，然后在hook到的compCompile里面直接写入0xC3，也就是ret指令。
+CodeCracker's processing method is to directly Invoke, and then directly write 0xC3 in the compCompile hook, which is the ret instruction.
 
 ![Alt text](./26.png)
 
 ![Alt text](./27.png)
 
-这样JIT脱壳就大体介绍完成了。
+This completes the introduction of JIT shelling.
 
-### 使用方法
+### Instructions
 
-从 https://github.com/wwh1004/JitUnpacker-Framework clone我的代码到本地，注意把子模块一起clone。然后编译，生成文件。你会看到一个.bat文件
+From https://github.com/wwh1004/JitUnpacker-Framework clone my code to local, pay attention to clone the submodules together. Then compile and generate the file. You will see a .bat file
 
 ![Alt text](./28.png)
 
-然后下载我的ToolLoader https://github.com/wwh1004/ToolLoader 这个里面有编译好的，下载之后只需要把这5个文件复制出来。
+Then download my ToolLoader https://github.com/wwh1004/ToolLoader which is compiled, after downloading only need to copy these 5 files.
 
 ![Alt text](./29.png)
 
-现在，你需要下载好mscorwks.dll mscorjit.dll clr.dll clrjit.dll的符号文件，怎么下载别问我了，x64dbg windbg都可以下载，然后修改这里的YOUR_SYMBOLS_PATH
+Now, you need to download the symbol file of mscorwks.dll mscorjit.dll clr.dll clrjit.dll, please do n’t ask me how to download, x64dbg windbg can be downloaded, and then modify YOUR_SYMBOLS_PATH
 
 ![Alt text](./30.png)
 
-比如我的是E:\Symbols，那就改成这样，然后保存。
+For example, mine is E: \ Symbols, then change it to this and save it.
 
 ![Alt text](./31.png)
 
-运行RuntimeFunctionConfigGenerator.bat，会生成"JitUnpacker.RuntimeFunctions.CLR20.x86.config"和"JitUnpacker.RuntimeFunctions.CLR40.x86.config"这2个配置文件。
+Running RuntimeFunctionConfigGenerator.bat will generate two configuration files "JitUnpacker.RuntimeFunctions.CLR20.x86.config" and "JitUnpacker.RuntimeFunctions.CLR40.x86.config".
 
 ![Alt text](./32.png)
 
-把要脱壳的文件，包括相关的dll一起复制到JitUnpacker.dll所在目录，shift+右键点击文件夹，选择在此处打开命令行窗口。
+Copy the files to be unpacked, including related dlls, to the directory where JitUnpacker.dll is located, shift + right-click the folder, and select to open the command line window here.
 
-可以先看看JitUnpacker参数
+You can look at the JitUnpacker parameters first
 
 ![Alt text](./33.png)
 
--f 指定要脱壳的文件的路径
+-f specifies the path of the file to be unpacked
 
--hook-type 指定jithook的类型，这个翻源码找得到有什么类型，默认用inlinehook
+-hook-type Specify the type of jithook, what type can be found through this source code, the default is inlinehook
 
-其它的参数自己看得懂了。
+The other parameters can be understood by myself.
 
-找个CodeCracker的工具做示范，比如SimpleByteArrayInit.exe，用dnSpy可以知道这个是.NET 2.0 x86的
+Find a CodeCracker tool for demonstration, such as SimpleByteArrayInit.exe, using dnSpy can know that this is .NET 2.0 x86
 
 ![Alt text](./34.png)
 
-然后命令行里面输入"Tool.Loader.CLR20.x86.exe JitUnpacker.dll -f SimpleByteArrayInit.exe"，回车即可。
+Then enter "Tool.Loader.CLR20.x86.exe JitUnpacker.dll -f SimpleByteArrayInit.exe" in the command line and press Enter.
 
 ![Alt text](./35.png)
 
-## 写在最后
+## Write at the end
 
-**我不接单，不要私信找我，也不要通过各种聊天方式加我好友！！！**
+** I don't take orders, don't ask me privately, and don't add my friends through various chat methods! ! ! **
 
-**DNG等壳脱壳代码不会出现在开源版本的JitUnpacker-Framework中，也不要问我私有版本的JitUnpacker的代码，这些不会放出的！！！**
+** DNG and other shell unpacking code will not appear in the open source version of JitUnpacker-Framework, and do n’t ask me the code of the private version of JitUnpacker, these will not be released! ! ! **
 
-**如果看不懂文章，或者不会使用文章给出的工具，可以自己多研究研究，这个我不会回复。当初一点资料都没，CodeCracker的源码还一堆错误的时候，还是和画眉一点一点研究，写出了这个脱壳机。**
+** If you do not understand the article, or do not use the tools given in the article, you can do more research on your own, I will not reply. At the beginning, when there was no information at all, and the source code of CodeCracker was still a bunch of errors, I still studied bit by bit with Thrush and wrote this shelling machine. **
 
-**如果脱壳机有BUG，或者不能在某个.NET版本上工作，尝试其它.NET版本，我不会继续更新这个开源版本的JitUnpacker-Framework，这个仓库仅供研究使用！！！**
+** If the sheller has bugs, or cannot work on a certain .NET version, try other .NET versions, I will not continue to update this open source version of JitUnpacker-Framework, this repository is for research use only! ! ! **
