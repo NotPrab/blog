@@ -1,58 +1,58 @@
-# .NET下的动态解密与反动态解密
+# .Dynamic decryption and anti-dynamic decryption under .NET
 
-## 前言
+## Foreword
 
-de4dot已经很久没有更新了，脱一些壳没有现成的工具。想要脱掉它们，几乎只能自己写工具。
+de4dot has not been updated for a long time, and there are no ready tools for removing some shells. If you want to get rid of them, you can only write tools yourself.
 
-.NET下解密一般有2种方式，静态解密和动态解密，静态解密速度更快，但是写静态解密工具难度是非常大的，而且兼容性不一定很好（比如de4dot的大部分解密都是静态解密，壳一更新，de4dot就必需更新）。
+There are generally two ways to decrypt under .NET, static decryption and dynamic decryption. Static decryption is faster, but it is very difficult to write static decryption tools, and the compatibility is not necessarily very good (for example, most decryption of de4dot is static Decryption, as soon as the shell is updated, de4dot must be updated).
 
-所以我们需要使用动态解密。动态解密也不是没有缺点的，比如最大的缺点就是要求被解密的程序集必需可以正常运行。但是相较于易开发，易维护，兼容性好等优点，这点缺点算不上什么。本文将介绍一些简单的动态解密与反动态解密。
+So we need to use dynamic decryption. Dynamic decryption is not without its shortcomings. For example, the biggest shortcoming is that the decrypted assembly must be able to run normally. But compared to the advantages of easy development, easy maintenance, good compatibility, etc., this shortcoming is not much. This article will introduce some simple dynamic decryption and anti-dynamic decryption.
 
-## Agile.NET的字符串加密
+## Agile.NET string encryption
 
-### 分析
+### analysis
 
-我们从最简单的开始，先尝试一下Agile.NET的字符串加密。我之前发了一个UnpackMe，不知是否有人搞定了。我们先看看Agile.NET的字符串加密，这个算是比较简单的动态解密。
+Let's start with the simplest, first try Agile.NET string encryption. I sent an UnpackMe before, and I do n’t know if anyone got it. Let's take a look at Agile.NET's string encryption first, which is relatively simple and dynamic decryption.
 
-我们用dnSpy打开UnpackMe，看看字符串被加密成什么样了。
+We use dnSpy to open UnpackMe and see what the string is encrypted.
 
 ![Agile.NET字符串加密一览](./Agile.NET字符串加密一览.png)
 
-可以看到，所有字符串变成了一串乱码，然后传给了一个特殊的方法，这个特殊的方法会把乱码的字符串转化成正常的字符串，也就是解密。
+It can be seen that all the character strings become a string of garbled characters, which are then passed to a special method. This special method converts the garbled character string into a normal character string, that is, decryption.
 
-我们点击一下这个方法，看看这个方法内部是怎么解密字符串的。
+We click on this method to see how the string is decrypted inside this method.
 
 ![Agile.NET字符串解密器方法](./Agile.NET字符串解密器方法.png)
 
 ![Agile.NET字符串解密器方法-去代-理调用](./Agile.NET字符串解密器方法-去代-理调用.png)
 
-可以看到，这个解密很简单，主要是Xor。为了方便讲解，我把代-理调用先去掉了，不然看不太出这个字符串解密器方法是什么样的。（等下会讲解Agile.NET的代-理调用，这里不用着急。）
+As you can see, this decryption is very simple, mainly Xor. In order to facilitate the explanation, I removed the agent-management call first, otherwise I can't see what this string decryptor method looks like. (We will explain Agile.NET's agent-management call later, don't worry here.)
 
-如此简单的解密，我们写一个静态解密当然可以，而且也不复杂，效率还更高，但是本文讲解的是动态解密。所以接下来我们讲解如何自己写一个动态解密。
+Such simple decryption, we can write a static decryption, of course, and it is not complicated, and the efficiency is still higher, but this article explains dynamic decryption. So next we explain how to write a dynamic decryption by ourselves.
 
-### 编写解密工具
+### Write a decryption tool
 
-在之前的图中，我们可以看到Agile.NET的字符串加密非常简单，只是把字符串本身加密了，然后传递给字符串解密器。在C#层面至少是这样，但是IL层面也是这样吗，没有其它混淆吗？我们将dnSpy的反编译模式从C#切换到IL看看。
+In the previous figure, we can see that Agile.NET's string encryption is very simple, just encrypt the string itself, and then pass it to the string decryptor. This is at least true at the C # level, but is it also true at the IL level, is there any other confusion? Let's switch the decompilation mode of dnSpy from C # to IL.
 
 ![Agile.NET字符串加密IL层面一览](./Agile.NET字符串加密IL层面一览.png)
 
-可以看到，这个真的就是C#显示的那样，把字符串压入栈，然后调用字符串解密器方法。（Agile.NET的是这样，但是不代表别的壳也这样，这个要具体分析的。）这样我们编写解密工具就又更容易了。
+As you can see, this is really what C # shows, push the string onto the stack, and then call the string decryptor method. (This is the case for Agile.NET, but it does not mean that other shells are the same. This needs to be analyzed in detail.) In this way, it is easier to write decryption tools.
 
-这里顺便提一下，还是为了讲解方便，我们写最简单的那种解密工具，不能像de4dot那样自动识别目标程序运行时版本的，即自动适应.NET 2.0 4.0的程序。如果要写成可以自适应的，可以自行阅读de4dot代码。de4dot的代码其实挺复杂，设计模式太多了，所以我也没用de4dot那样使用子进程来实现。我是使用了Loader，让Loader来加载我们的解密工具，而我们手动选择Loader。看不懂这段文字也没关系，解密工具写多了就明白这段文字在说什么了。我们继续。
+Here, by the way, for the convenience of explanation, we write the simplest decryption tool, which cannot automatically recognize the runtime version of the target program like de4dot, that is, automatically adapts to the .NET 2.0 4.0 program. If you want to write adaptive, you can read the de4dot code yourself. The code of de4dot is actually quite complicated, there are too many design patterns, so I did not use sub-processes like de4dot. I used Loader, let Loader load our decryption tool, and we manually select Loader. It doesn't matter if you don't understand this text, if you write more decryption tools, you will understand what this text is saying. We continue.
 
-我们新建一个项目，项目的目标运行时选择和要解密的程序一样的版本。比如我们这个UnpackMe是.NET 4.5，我们选4.5就行了。（其实4.0也可以，因为clr版本一样就行，具体的不过多细说，可以自行研究.NET的一些技术细节。）
+We create a new project, and the target of the project is the same version as the program to be decrypted. For example, our UnpackMe is .NET 4.5, we choose 4.5. (Actually, 4.0 is fine, because the clr version is the same, but the details are not too detailed. You can study some technical details of .NET yourself.)
 
-添加下面这样的代码，做好框架，初始化字段，接下来代码写在ExecuteImpl()里面。
+Add the following code, make a good frame, initialize the field, and then write the code in ExecuteImpl ().
 
 ![字符串解密1-1](./字符串解密1-1.png)
 
-我们再用dnSpy看看，Agile.NET的字符串解密器方法有什么特征，我们先定位到这个方法。
+Let's use dnSpy to see what are the characteristics of the Agile.NET string decryptor method, we first locate this method.
 
 ![Agile.NET字符串解密器方法-2](./Agile.NET字符串解密器方法-2.png)
 
-可以看到，字符串解密器方法在命名空间为空的&lt;AgileDotNetRT&gt;类，字符串解密器本身的方法签名应该是string (string)。意思就是字符串解密器只有一个参数并且为string类型，返回值也为string，这样我们就可以使用特征定位到字符串解密器了。
+It can be seen that the string decryptor method is the empty &lt;AgileDotNetRT&gt; class in the namespace and the method signature of the string decryptor itself should be string (string). This means that the string decryptor has only one argument and is of the string type, and the return value is also string, so that we can use features to locate to the string decryptor.
 
-我们这样写定位代码。（当然，和我的不一样也没问题，只要能准确定位到就行。）这些代码都是添加到ExecuteImpl()方法内的。
+We write the location code like this. (Of course, it's okay to be different than mine, as long as it can be accurately located.) This code is all added to the ExecuteImpl() method.
 
 ``` csharp
 TypeDef agileDotNetRT;
@@ -60,14 +60,14 @@ MethodDef decryptorDef;
 MethodBase decryptor;
 
 agileDotNetRT = _moduleDef.Types.First(t => t.Namespace == string.Empty && t.Name == "<AgileDotNetRT>");
-// 寻找命名空间为空，类名为"<AgileDotNetRT>"的类
+// Find namespace empty with class "<AgileDotNetRT>"
 decryptorDef = agileDotNetRT.Methods.First(m => m.Parameters.Count == 1 && m.Parameters[0].Type.TypeName == "String" && m.ReturnType.TypeName == "String");
-// 在类中寻找只有一个参数且参数类型为String，返回值类型也为String的方法
+// Find a method in the class that has only one parameter with the parameter type String and the return value type String
 decryptor = _module.ResolveMethod(decryptorDef.MDToken.ToInt32());
-// 把dnlib的MethodDef转换成.NET反射中的MethodBase
+// Convert dnlib's MethodDef to MethodBase in .NET reflection
 ```
 
-为了更快速的遍历ModuleDefMD中的所有方法，我们需要一个扩展方法。我们这样写。
+In order to iterate through all the methods in ModuleDefMD more quickly, we need an extension method. We write it this way.
 
 ``` csharp
 internal static class ModuleDefExtensions {
@@ -75,16 +75,16 @@ internal static class ModuleDefExtensions {
 		uint methodTableLength;
 
 		methodTableLength = moduleDef.TablesStream.MethodTable.Rows;
-		// 获取Method表的长度 
+		// Get the length of the Method table. 
 		for (uint rid = 1; rid <= methodTableLength; rid++)
 			yield return moduleDef.ResolveMethod(rid);
 	}
 }
 ```
 
-上面代码中提到的Method表是.NET元数据表流中的一个表，储存了一个程序集中所有方法的信息，非常重要。Method表中每个元素都是连续的，不要问我为什么，这个是元数据的知识，一时半会也是解释不清的，需要读者自己研究，当然，我们写个字符串解密工具不需要了解那么底层的知识。
+The Method table mentioned in the code above is a table in the .
 
-也许读者还有疑问，我们为什么要这样写，难道不能这样遍历每一个方法么？
+Perhaps the reader is still wondering why we write this way, can't we iterate through each method like this?
 
 ``` csharp
 foreach (TypeDef typeDef in _moduleDef.Types)
@@ -94,12 +94,12 @@ foreach (TypeDef typeDef in _moduleDef.Types)
 	}
 ```
 
-看着应该是没问题的，但是，这样会遍历不到嵌套类型中的方法。比如这样就是一个嵌套类型，在一个类里面又声明了一个类B，B就是嵌套类型。
+Watching should be fine, however, this will traverse methods that are not in the nested type. For example, this is a nested type, a class B is declared in a class, B is the nested type.
 
 ![嵌套类型](./嵌套类型.png)
 ![ModuleDef.Types](./ModuleDef.Types.png)
 
-所以这样是不行的，ModuleDef.Types不会返回嵌套类型，我们需要使用ModuleDef.GetTypes()。每次遍历方法我们都需要写2个foreach，所以不如直接用一个扩展方法代替。
+So this won't work, ModuleDef.Types won't return nested types, we need to use ModuleDef.GetTypes(). We need to write 2 foreach per iterative method, so why not just use an extended method instead.
 
 ``` csharp
 foreach (MethodDef methodDef in _moduleDef.EnumerateAllMethodDefs()) {
@@ -113,11 +113,11 @@ foreach (MethodDef methodDef in _moduleDef.EnumerateAllMethodDefs()) {
 }
 ```
 
-这样我们就可以遍历所有有CliBody的方法的Instruction了。我们再切换到dnSpy，看看Agile.NET是怎么调用字符串解密器方法的。
+This way we can iterate through all the methods that have CliBody's method. Let's switch to dnSpy again and see how Agile.NET calls the string decryptor method.
 
 ![Agile.NET字符串加密IL层面一览](./Agile.NET字符串加密IL层面一览.png)
 
-所以，我们这样定位到要解密的字符串的位置，并且解密字符串，再替换回去。
+So, we locate the string to be decrypted this way, and decrypt the string and replace it back.
 
 ``` csharp
 if (instructionList[i].OpCode.Code == Code.Call && instructionList[i].Operand == decryptorDef && instructionList[i - 1].OpCode.Code == Code.Ldstr) {
@@ -130,31 +130,31 @@ if (instructionList[i].OpCode.Code == Code.Call && instructionList[i].Operand ==
 }
 ```
 
-这样，我们的字符串解密工具就写完了。
+That way, our string decryption tool is written.
 
-## Agile.NET的代-理调用
+## Agile.NET's proxy call
 
-这个代-理调用的解密是这次讲解中最难的一个，如果读者没看懂上面的字符串解密，强烈建议跳过这一节。
+This decryption of the generation-reasoning call is one of the most difficult in this presentation, and it is highly recommended to skip this section if the reader does not understand the string decryption above.
 
-### 分析
+### analysis
 
-我们还是先用dnSpy打开那个UnpackMe。
+We'll still open that UnpackMe with dnSpy first.
 
 ![Agile.NET代-理调用一览](./Agile.NET代-理调用一览.png)
 
-可以看到部分调用外部方法被混淆了，调用当前程序集的方法不会被混淆。我们再调试看看，这些委托是什么。
+It can be seen that some calls to external methods are obfuscated, and calls to the current set of methods are not obfuscated. Let's debug again and see what these commissions are.
 
 ![Agile.NET代-理调用调试-1](./Agile.NET代-理调用调试-1.png)
 
-按F11，直接进入了这里，没有什么收获。
+Press F11 and it's straight to here, no joy.
 
 ![Agile.NET代-理调用调试-2](./Agile.NET代-理调用调试-2.png)
 
-我们看看哪里初始化了这个委托字段，我们可以发现点什么东西。
+Let's look at where this delegated field is initialized and we can find something.
 
 ![Agile.NET代-理调用代-理字段初始化-1](./Agile.NET代-理调用代-理字段初始化-1.png)
 
-我们进入dau方法，dnSpy反编译结果如下。
+We go to the DAU method and the dnSpy decompile results are as follows.
 
 ``` csharp
 using System;
@@ -292,27 +292,27 @@ public class {FE3C441D-DF9D-407b-917D-0B4471A8296C}
 }
 ```
 
-这段代码还是比较简单的，传入代-理类型的token，然后遍历类型中每个字段，通过字段名字获取代-理方法的MemberRef Token，然后ReolveMethod。如果是静态方法，直接创建delegate，如果是实例方法，使用DynamicMethod创建一个方法来调用。静态解密可能还会比动态解密简单。
+This code is still relatively simple, pass the token of the proxy-rational type, then iterate through each field in the type, get the MemberRef Token of the proxy-rational method through the field name, then ReolveMethod. if it is a static method, create a delegate directly, if it is an instance method, create a method to call using DynamicMethod. Static decryption may also be simpler than dynamic decryption.
 
-### 编写解密工具
+### Writing decryption tools
 
-我们依然这样写一个框架。然后把代码添加到ExecuteImpl()中。
+We still write a framework like this. Then add the code to ExecuteImpl().
 
 ![代-理调用解密1-1](./代-理调用解密1-1.png)
 
-我们按特征，找到代-理字段初始化的地方。
+We find the place where the generation-rational field is initialized, by feature.
 
 ``` csharp
 TypeDef[] globalTypes;
 MethodDef decryptor;
 
 globalTypes = _moduleDef.Types.Where(t => t.Namespace == string.Empty).ToArray();
-// 查找所有命名空间为空的类型
+// Find all types with empty namespaces
 decryptor = globalTypes.Where(t => t.Name.StartsWith("{", StringComparison.Ordinal) && t.Name.EndsWith("}", StringComparison.Ordinal)).Single().Methods.Single(m => !m.IsInstanceConstructor && m.Parameters.Count == 1);
-// 查找代-理解密方法
+// Find generation - understand the secret method
 ```
 
-由于所有代-理类的静态构造器都会自动解密出真实的方法，我们不需要手动调用代-理方法解密器。我们只需要遍历这些代-理类的字段，找出字段对应的MemberRef。
+Since the static constructor of all generation-rational classes automatically decrypts the real method, we do not need to manually call the generation-rational method decryptor. We just need to iterate through the fields of these generation-rational classes to find the MemberRef to which the fields correspond.
 
 ``` csharp
 foreach (TypeDef typeDef in globalTypes) {
@@ -321,11 +321,11 @@ foreach (TypeDef typeDef in globalTypes) {
 	cctor = typeDef.FindStaticConstructor();
 	if (cctor == null || !cctor.Body.Instructions.Any(i => i.OpCode == OpCodes.Call && i.Operand == decryptor))
 		continue;
-	// 查找出静态构造器调用了代-理解密方法的类型
+	// Find out the type of static constructor that invokes a generation-understanding dense method.
 }
 ```
 
-只要一个类的静态构造器调用了decryptor，就说明这个类是代-理类。我们对代-理类的字段进行遍历。
+As long as the static constructor of a class calls the decryptor, that class is a surrogate class. We traverse the fields of the generation-rational class.
 
 ``` csharp
 foreach (FieldInfo fieldInfo in _module.ResolveType(typeDef.MDToken.ToInt32()).GetFields(BindingFlags.NonPublic | BindingFlags.Static)) {
@@ -339,7 +339,7 @@ foreach (FieldInfo fieldInfo in _module.ResolveType(typeDef.MDToken.ToInt32()).G
 }
 ```
 
-这里的realMethod还有可能是Agile.NET运行时创建的动态方法，因为要支持callvirt指令。我们写一个方法来判断是不是动态方法。
+The realMethod here may also be a dynamic method created by the Agile.NET runtime, since it supports the callvirt instruction. We write a way to tell if it's a dynamic method.
 
 ``` csharp
 private static bool IsDynamicMethod(MethodBase methodBase) {
@@ -350,7 +350,7 @@ private static bool IsDynamicMethod(MethodBase methodBase) {
 		int token;
 
 		token = methodBase.MetadataToken;
-		// 获取动态方法的Token会抛出InvalidOperationException异常
+		// The Token that gets the dynamic method throws an InvalidOperationException exception.
 	}
 	catch (InvalidOperationException) {
 		return true;
@@ -359,7 +359,7 @@ private static bool IsDynamicMethod(MethodBase methodBase) {
 }
 ```
 
-我们先判断是否为动态方法，然后再进行替换。
+We first determine if it is a dynamic method, and then we replace it.
 
 ``` csharp
 if (IsDynamicMethod(realMethod)) {
@@ -375,7 +375,7 @@ else
 	ReplaceAllOperand(proxyFieldDef, realMethod.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, (MemberRef)_moduleDef.Import(realMethod));
 ```
 
-ReplaceAllOperand的实现如下。
+The implementation of ReplaceAllOperand is as follows.
 
 ``` csharp
 private void ReplaceAllOperand(FieldDef proxyFieldDef, OpCode callOrCallvirt, MemberRef realMethod) {
@@ -389,7 +389,7 @@ private void ReplaceAllOperand(FieldDef proxyFieldDef, OpCode callOrCallvirt, Me
 
 		if (!methodDef.HasBody)
 			continue;
-		// 只遍历有CilBody的方法
+		// Iterate only the methods with CilBody
 		instructionList = methodDef.Body.Instructions;
 		for (int i = 0; i < instructionList.Count; i++) {
 			// ldsfld    class xxx xxx::'xxx'
@@ -398,15 +398,15 @@ private void ReplaceAllOperand(FieldDef proxyFieldDef, OpCode callOrCallvirt, Me
 			if (instructionList[i].OpCode != OpCodes.Ldsfld || instructionList[i].Operand != proxyFieldDef)
 				continue;
 			for (int j = i; j < instructionList.Count; j++) {
-				// 从i开始寻找最近的call
+				// Start with i to find the nearest call
 				if (instructionList[j].OpCode.Code != Code.Call || !(instructionList[j].Operand is MethodDef) || ((MethodDef)instructionList[j].Operand).DeclaringType != ((TypeDefOrRefSig)proxyFieldDef.FieldType).TypeDefOrRef)
 					continue;
 				instructionList[i].OpCode = OpCodes.Nop;
 				instructionList[i].Operand = null;
-				// 清除 ldsfld    class xxx xxx::'xxx'
+				// Clear  ldsfld    class xxx xxx::'xxx'
 				instructionList[j].OpCode = callOrCallvirt;
 				instructionList[j].Operand = realMethod;
-				// 替换 call      instance void xxx::Invoke()
+				// replace call      instance void xxx::Invoke()
 				break;
 			}
 		}
@@ -414,22 +414,22 @@ private void ReplaceAllOperand(FieldDef proxyFieldDef, OpCode callOrCallvirt, Me
 }
 ```
 
-## ConfuserEx的AntiTamper
+## ConfuserEx's AntiTamper
 
-### 分析
+### analysis
 
-在好早之前，我也发过一个关于AntiTamper帖子。那个帖子讲的是静态解密，似乎兼容性还是有点问题，这次我们来试试动态解密。我们先打开ConfuserEx这个项目。
+A good while back, I also made a post about AntiTamper. That post was about static decryption, and it seems that compatibility is still a bit of a problem, so let's try dynamic decryption this time. Let's open the project ConfuserEx first.
 
 ![ConfuserEx的AntiTamper-1](./ConfuserEx的AntiTamper-1.png)
 ![ConfuserEx的AntiTamper-2](./ConfuserEx的AntiTamper-2.png)
 
-这个是我以前注释的，AntiTamper的原理是把所有方法体单独放到一个Section中，然后利用其它Section的Hash进行解密。所以如果文件本身被篡改了，运行时解密Section肯定会失败。这个Section永远被ConfuserEx插入在其它Section之前，而且算是整体加密，所以动态解密会非常容易。
+This one I annotated previously, AntiTamper's principle is to put all method bodies into a single Section, and then decrypt them using the hash of the other Sections. So if the file itself is tampered with, the runtime decryption of Section will certainly fail. This Section is always inserted by ConfuserEx before the other Sections, and it's overall encrypted, so it's easy to decrypt dynamically.
 
-### 编写解密工具
+### Writing decryption tools
 
-还是和以前一样，写个框架，代码放ExecuteImpl()里面。
+As usual, write a framework and put the code in ExecuteImpl().
 
-我们添加个PEInfo类
+Let's add a PEInfo class.
 
 ``` csharp
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -468,21 +468,21 @@ internal sealed unsafe class PEInfo {
 		p += *(uint*)(p + 0x3C);
 		// NtHeader
 		p += 4 + 2;
-		// 跳过 Signature + Machine
+		// Skip Signature + Machine
 		_sectionsCount = *(ushort*)p;
 		p += 2 + 4 + 4 + 4;
-		// 跳过 NumberOfSections + TimeDateStamp + PointerToSymbolTable + NumberOfSymbols
+		// skip NumberOfSections + TimeDateStamp + PointerToSymbolTable + NumberOfSymbols
 		optionalHeaderSize = *(ushort*)p;
 		p += 2 + 2;
-		// 跳过 SizeOfOptionalHeader + Characteristics
+		// skip SizeOfOptionalHeader + Characteristics
 		p += optionalHeaderSize;
-		// 跳过 OptionalHeader
+		// skip OptionalHeader
 		pSectionHeaders = (IMAGE_SECTION_HEADER*)p;
 	}
 }
 ```
 
-然后，我们读取第一个Section的RVA和Size。调用模块静态构造器，最后还原回去。
+We then read the RVA and Size of the first Section. call the module static constructor and finally restore back.
 
 ``` csharp
 PEInfo peInfo;
@@ -496,13 +496,13 @@ RuntimeHelpers.RunModuleConstructor(_module.ModuleHandle);
 Marshal.Copy((IntPtr)((byte*)peInfo.PEImage + sectionHeader.VirtualAddress), _peImage, (int)sectionHeader.PointerToRawData, (int)sectionHeader.SizeOfRawData);
 ```
 
-这里的_peImage是一个字节数组，表示要解密的程序集的字节数组形式。动态解密AntiTamper连dnlib都不需要使用，比静态解密方便很多。解密之后，手动Patch掉AntiTamper的运行时就行。
+The _peImage here is a byte array representing the byte array form of the set to be decrypted. Dynamic decryption of AntiTamper does not even require the use of dnlib, which is much easier than static decryption. Once decrypted, just manually Patch off the AntiTamper runtime.
 
-## 反动态解密
+## anti-dynamic decryption (computing)
 
-动态解密也有自己的缺点，比如容易被检测。文章写了3个动态解密，其实原理都差不多，最核心的还是反射API。我们可以利用这一点，写出一些反动态解密的代码。
+Dynamic decryption has its own drawbacks, such as being easy to detect. The article wrote 3 dynamic decryption, in fact the principle is similar, the core is the reflection API, we can use this to write some anti-dynamic decryption code.
 
-- 最简单的，我们可以像ILProtector一样，检测调用来源，如果当前方法的调用方是最底层的Invoke方法，那就说明被非法调用了。
-- 我们还可以做得更极端，检测整个调用堆栈，比如调用堆栈里面是否有de4dot的字样。
-- 通过AppDomain.CurrentDomain.GetAssemblies()获取所有已加载程序集，判断里面是否有非法程序集。
-- 如果一个程序是可执行文件，并且不会被其它程序集引用，那么可以使用Assembly.GetEntryAssembly()检测入口程序集是不是本身，如果不是，那说明当前程序集被其它程序集用反射API加载了。
+- At its simplest, we can detect the source of the call, like ILProtector, and if the caller of the current method is the lowest-level Invoke method, then it's an illegal call.
+- We can also go to the extreme and detect the entire call stack, such as whether the call stack has the word de4dot in it.
+- GetAssemblies() to get all the loaded assemblies and determine if there are any illegal assemblies in it.
+- If an application is an executable and will not be referenced by other assemblies, you can use Assembly.GetEntryAssembly() to check if the entry assembly is itself.
