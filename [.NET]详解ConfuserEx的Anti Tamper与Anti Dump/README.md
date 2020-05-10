@@ -1,63 +1,63 @@
-# [.NET]详解ConfuserEx的Anti Tamper与Anti Dump by Wwh / NCK
+# [.NET]Explain in detail ConfuserEx ofAnti Tamper with Anti Dump by Wwh / NCK
 
-许多人都知道利用dnSpy单步调试+Dump+CodeCracker的一系列工具可以脱去ConfuserEx壳，这些在网上都有教程，但是并没有文章说明过背后的原理。本文讲尽可能详细解说ConfuserEx的Anti Tamper与Anti Dump。
+Many people are aware of the ability to shed the ConfuserEx shell using dnSpy's array of one-step debugging+Dump+CodeCracker tools, which are available online in tutorials, but there are no articles that explain the rationale behind them. This article explains ConfuserEx's Anti Tamper and Anti Dump in as much detail as possible.
 
-**（有耐心并且了解一点点的PE结构完全可以看懂）**
+**（Patience and a little understanding of the PE structure is perfectly understandable.）**
 
-## ConfuserEx整个项目结构
+## ConfuserEx Overall project structure
 
-在开始讲解之前，我们大概了解一下ConfuserEx项目的结构。
+Before we get started, let's get a general idea of the structure of the ConfuserEx project.
 
-我们用Visual Studio打开ConfuserEx，项目大概是这样的：
+We open ConfuserEx in Visual Studio and the project looks something like this.
 
 ![ConfuserEx项目结构](./ConfuserEx项目结构.png)
 
-- Confuser.CLI的是命令行版本，类似de4dot的操作方式。
-- Confuser.Core是核心，把所有部分Protection组合到一起。
-- Confuser.DynCipher可以动态生成加密算法。
-- Confuser.Protections里面包含了所有Protection，这是需要研究的部分。
-- Confuser.Renamer可以对类名、方法名等重命名，包括多种重命名方式，比如可逆的重命名，这些没有在ConfuserEx的GUI里面显示就是了。
-- Confuser.Runtime是运行时，比如Anti Dump的实现，其实就在这个项目里面。上面提到的Confuser.Protections会把Confuser.Runtime中的Anti Dump的实现注入到目标程序集。
-- ConfuserEx是GUI，没必要多说。
+- Confuser.CLI is a command-line version, similar to the way de4dot operates.
+- Confuser.Core is the core that puts all the parts of Protection together.
+- Confuser.DynCipher does Encryption algorithms can be generated dynamically.
+- Confuser.Protections contains all the Protection, which is the part that needs to be studied.
+- Confuser.Renamer are Class names, method names, etc. can be renamed, including various renaming methods, such as reversible renaming, which are not shown in ConfuserEx's GUI.
+- Confuser.Runtime is the runtime, like the implementation of Anti Dump, that's actually in this project. Mentioned above. Confuser.Protections will take Confuser.Runtime middle Anti Dump implementation is injected into the target assembly.
+- ConfuserEx GUI，No need to say more.
 
-**整个项目几乎没什么注释，下面的中文注释均为我添加的。**
+** There are few notes on the entire project, and the notes below in Chinese were added by me. **
 
 ## Anti Dump
 
-Anti Dump比起Anti Tamper简单不少，所以我们先来了解一下Anti Dump。
+Anti Dump compared to Anti Tamper is a lot simpler, so let's get to know it first. Anti Dump。
 
-Anti Dump的实现只有一个方法，非常简洁。
+Anti Dump is only one way to achieve this, and it is very simple.
 
-我们找到Confuser.Protections项目的AntiDumpProtection.cs。
+We found it. Confuser.Protections project AntiDumpProtection.cs。
 
 ![AntiDumpProtection.cs](./AntiDumpProtection.cs.png)
 
 ``` csharp
 protected override void Execute(ConfuserContext context, ProtectionParameters parameters) {
     TypeDef rtType = context.Registry.GetService<IRuntimeService>().GetRuntimeType("Confuser.Runtime.AntiDump");
-    // 获取Confuser.Runtime项目中的AntiDump类
+    // get Confuser.Runtime project AntiDump class
 
     var marker = context.Registry.GetService<IMarkerService>();
     var name = context.Registry.GetService<INameService>();
 
     foreach (ModuleDef module in parameters.Targets.OfType<ModuleDef>()) {
         IEnumerable<IDnlibDef> members = InjectHelper.Inject(rtType, module.GlobalType, module);
-        // 将Confuser.Runtime.AntiDump类注入到目标程序集，返回目标程序集中的所有IDnlibDef
+        // general Confuser.Runtime.AntiDump class is injected into the target assembly, returning allIDnlibDef
 
         MethodDef cctor = module.GlobalType.FindStaticConstructor();
-        // 找到<Module>::.cctor
+        // find <Module>::.cctor
         var init = (MethodDef)members.Single(method => method.Name == "Initialize");
         cctor.Body.Instructions.Insert(0, Instruction.Create(OpCodes.Call, init));
-        // 插入call void Confuser.Runtime.AntiDump::Initialize()这条IL指令
+        // insert call void Confuser.Runtime.AntiDump::Initialize()This IL instruction.
 
         foreach (IDnlibDef member in members)
             name.MarkHelper(member, marker, (Protection)Parent);
-        // 将这些IDnlibDef标记为需要重命名的
+        // Mark these IDnlibDef as the ones to be renamed
     }
 }
 ```
 
-AntiDumpProtection做的只是注入，所以我们转到Confuser.Runtime中的AntiDump.cs
+AntiDumpProtectionDo just inject, so we go to Confuser.Runtime middle AntiDump.cs
 
 ![AntiDump.cs](./AntiDump.cs.png)
 
@@ -67,41 +67,41 @@ static unsafe void Initialize() {
     Module module = typeof(AntiDump).Module;
     var bas = (byte*)Marshal.GetHINSTANCE(module);
     byte* ptr = bas + 0x3c;
-    // 存放NT头偏移的地址
+    // Address where the NT header offset is stored
     byte* ptr2;
     ptr = ptr2 = bas + *(uint*)ptr;
-    // ptr指向NT头
+    // The ptr points to the NT header.
     ptr += 0x6;
-    // ptr指向文件头的NumberOfSections
+    // ptr point to the file header NumberOfSections
     ushort sectNum = *(ushort*)ptr;
-    // 获取节的数量
+    // Number of sections acquired
     ptr += 14;
-    // ptr指向文件头的SizeOfOptionalHeader
+    // ptr point to the file header SizeOfOptionalHeader
     ushort optSize = *(ushort*)ptr;
-    // 获取可选头的大小
+    // Get the size of the optional head
     ptr = ptr2 = ptr + 0x4 + optSize;
-    // ptr指向第一个节头
+    // ptr point to the first node.
 
     byte* @new = stackalloc byte[11];
     if (module.FullyQualifiedName[0] != '<') //Mapped
     {
-        // 这里判断是否为内存加载的模块（dnSpy里面显示InMemory的），比如Assembly.Load(byte[] rawAssembly)
-        // 如果是内存加载的模块，module.FullyQualifiedName[0]会返回"<未知>"
+        // This is where you determine if the module is memory loaded or not.（dnSpy shows inside. InMemory of），For example. Assembly.Load(byte[] rawAssembly)
+        // If it's a memory-loaded module.，module.FullyQualifiedName[0] Will return "<unknown>"
         //VirtualProtect(ptr - 16, 8, 0x40, out old);
         //*(uint*)(ptr - 12) = 0;
         byte* mdDir = bas + *(uint*)(ptr - 16);
-        // ptr指向IMAGE_COR20_HEADER
+        // ptr point to IMAGE_COR20_HEADER
         //*(uint*)(ptr - 16) = 0;
 
         if (*(uint*)(ptr - 0x78) != 0) {
-            // 如果导入表RVA不为0
+            // If the import table RVA is not 0
             byte* importDir = bas + *(uint*)(ptr - 0x78);
             byte* oftMod = bas + *(uint*)importDir;
             // OriginalFirstThunk
             byte* modName = bas + *(uint*)(importDir + 12);
-            // 导入DLL的名称
+            // Import the name of the DLL
             byte* funcName = bas + *(uint*)oftMod + 2;
-            // 导入函数的名称
+            // Name of the imported function
             VirtualProtect(modName, 11, 0x40, out old);
 
             *(uint*)@new = 0x6c64746e;
@@ -112,7 +112,7 @@ static unsafe void Initialize() {
 
             for (int i = 0; i < 11; i++)
                 *(modName + i) = *(@new + i);
-            // 把mscoree.dll改成ntdll.dll
+            // handle mscoree.dll turn into ntdll.dll
 
             VirtualProtect(funcName, 11, 0x40, out old);
 
@@ -124,7 +124,7 @@ static unsafe void Initialize() {
 
             for (int i = 0; i < 11; i++)
                 *(funcName + i) = *(@new + i);
-            // 把_CorExeMain改成NtContinue
+            // handle _CorExeMain turn into NtContinue
         }
 
         for (int i = 0; i < sectNum; i++) {
@@ -132,37 +132,37 @@ static unsafe void Initialize() {
             Marshal.Copy(new byte[8], 0, (IntPtr)ptr, 8);
             ptr += 0x28;
         }
-        // 清零所有节的名称
+        // Clear the names of all sections
         VirtualProtect(mdDir, 0x48, 0x40, out old);
         byte* mdHdr = bas + *(uint*)(mdDir + 8);
-        // mdHdr指向STORAGESIGNATURE（开头是BSJB的那个）
+        // mdHdr point to STORAGESIGNATURE（The one that starts with the BSJB.）
         *(uint*)mdDir = 0;
         *((uint*)mdDir + 1) = 0;
         *((uint*)mdDir + 2) = 0;
         *((uint*)mdDir + 3) = 0;
-        // 将IMAGE_COR20_HEADER的cb MajorRuntimeVersion MinorRuntimeVersion MetaData清零
+        // general IMAGE_COR20_HEADER of cb MajorRuntimeVersion MinorRuntimeVersion MetaData clear out
 
         VirtualProtect(mdHdr, 4, 0x40, out old);
         *(uint*)mdHdr = 0;
-        // 删除BSJB标志，这样就无法搜索到STORAGESIGNATURE了
+        // Remove the BSJB logo so that STORAGESIGNATURE is not searchable
         mdHdr += 12;
-        // mdHdr指向iVersionString
+        // mdHdr point to iVersionString
         mdHdr += *(uint*)mdHdr;
         mdHdr = (byte*)(((ulong)mdHdr + 7) & ~3UL);
         mdHdr += 2;
-        // mdHdr指向STORAGEHEADER的iStreams
+        // mdHdr point to STORAGEHEADER of iStreams
         ushort numOfStream = *mdHdr;
-        // 获取元数据流的数量
+        // Number of metadata streams acquired
         mdHdr += 2;
-        // mdHdr指向第一个元数据流头
+        // mdHdr points to the first metadata stream header
         for (int i = 0; i < numOfStream; i++) {
             VirtualProtect(mdHdr, 8, 0x40, out old);
             //*(uint*)mdHdr = 0;
             mdHdr += 4;
-            // mdHdr指向STORAGESTREAM.iSize
+            // mdHdr point to STORAGESTREAM.iSize
             //*(uint*)mdHdr = 0;
             mdHdr += 4;
-            // mdHdr指向STORAGESTREAM.rcName
+            // mdHdr point toSTORAGESTREAM.rcName
             for (int ii = 0; ii < 8; ii++) {
                 VirtualProtect(mdHdr, 4, 0x40, out old);
                 *mdHdr = 0;
@@ -186,12 +186,12 @@ static unsafe void Initialize() {
                 *mdHdr = 0;
                 mdHdr++;
             }
-            // 清零STORAGESTREAM.rcName，因为这个是4字节对齐的，所以代码长一些
+            // zero STORAGESTREAM.rcName，Since this one is 4 bytes aligned, the code is longer
         }
     }
     else //Flat
     {
-        // 这里就是内存加载程序集的情况了，和上面是差不多的，我就不再具体分析了
+        // Here's what happens with the memory loading assemblies, which are pretty much the same as above, so I won't go into specifics
         //VirtualProtect(ptr - 16, 8, 0x40, out old);
         //*(uint*)(ptr - 12) = 0;
         uint mdDir = *(uint*)(ptr - 16);
@@ -321,16 +321,16 @@ static unsafe void Initialize() {
 }
 ```
 
-这里面修改导入表的部分其实是可有可无的，这个是可逆的
-清空节名称也是是可选的。
+This part of the import table is actually dispensable, it is reversible
+The name of the clearing section is also optional.
 
-其中非常重点的是将IMAGE_COR20_HEADER.MetaData清零，CLR已经完成了元数据的定位，并且保存了有关数据（可以使用CE搜索内存验证，搜索ImageBase+MetaData.VirtualAddress），不再需要这个字段，是可以清零的，但是我们读取元数据，是需要这个字段的。
+MetaData, CLR has done the metadata positioning and saved the data (you can use CE to search for memory verification, search ImageBase+MetaData.VirtualAddress), this field is no longer needed, it can be zeroed, but we read the metadata, this field is needed.
 
-接下来Anti Dump会删除BSJB标志，这样就无法搜索到STORAGESIGNATURE了。还有元数据流头的rcName字段，一并清零，这样也会让我们无法定位到元数据结构体，但是CLR不再需要这些了。
+Next Anti Dump will remove the BSJB logo so that STORAGESIGNATURE cannot be searched. There's also the rcName field for the metadata stream header, which is cleared together, which also makes it impossible to locate to the metadata structure, but CLR doesn't need that anymore.
 
-解决这个的办法很简单，把&lt;Module&gt;::.cctor()的call void Confuser.Runtime.AntiDump::Initialize()这条指令nop掉。我们要如何定位到这条指令呢？
+The solution to this is simple, nop the call void Confuser.Runtime.AntiDump::Initialize() of &lt;Module&gt;::.cctor(). How are we going to position ourselves to this instruction?
 
-这里有个投机取巧的办法，解决Anti Tamper之后，在dnSpy里面找出现了
+Here's a speculative solution, found in dnSpy after solving Anti Tamper
 
 ``` csharp
 Module module = typeof(AntiDump).Module;
@@ -340,25 +340,25 @@ if (module.FullyQualifiedName[0] != '<'){
 }
 ```
 
-这样的方法，并且这个方法还多次调用了VirtualProtect，原版ConfuserEx是调用了14次。
+Such a method, and this method also calls VirtualProtect several times, as the original ConfuserEx did 14 times.
 
-把call 这个方法的地方nop掉，注意显示模式切换到IL，然后点一下IL所在的FileOffset，用十六进制编辑器改成0，不然容易出问题。
+Nop off the place where this method is called, pay attention to the display mode to switch to IL, then click on the FileOffset where IL is, use the hex editor to change to 0, otherwise it is easy to have problems.
 
 ## Anti Tamper
 
-**Anti Tamper稍微麻烦一些，看不懂的地方实际操作一下，到ConfuserEx项目里面调试一下！！！！！！**
+**Anti Tamper is a little bit of a hassle to do what you can't read，arrive ConfuserEx Debugging inside the project！！！！！！**
 
-### 分析
+### analysis
 
-ConfuserEx里面有2种AntiTamper模式，一种的Hook JIT，另一种是原地解密。Hook JIT算是半成品，还没法正常使用，所以我们实际上看到的是原地解密模式，强度不是特别高。
+ConfuserEx is in there.2 AntiTamper pattern，一Hook JIT，The other is decryption in situ。Hook JIT is kind of half-baked and doesn't work yet, so what we're actually seeing is an in-situ decryption mode, not particularly strong.
 
-我们转到Confuser.Protections项目的AntiTamper\NormalMode.cs
+We go to Confuser.Protections project AntiTamper\NormalMode.cs
 
 ![NormalMode.cs](./NormalMode.cs.png)
 
-这里我就不注释了，因为这里也是一个注入器，和AntiDumpProtection.cs是差不多的，看不懂也没关系，看我后面分析实际实现就能明白了。
+I won't comment here because it's also an injector, which is similar to AntiDumpProtection.cs. It doesn't matter if you can't read it, just look at the actual implementation I'll analyze later.
 
-找到AntiTamper的实现AntiTamper.Normal.cs
+Finding the implementation of AntiTamper AntiTamper.Normal.cs
 
 ![AntiTamper.Normal.cs](./AntiTamper.Normal.cs.png)
 
@@ -367,7 +367,7 @@ static unsafe void Initialize() {
 	Module m = typeof(AntiTamperNormal).Module;
 	string n = m.FullyQualifiedName;
 	bool f = n.Length > 0 && n[0] == '<';
-          // f为true代表这是内存加载的程序集
+          // f for true means this is the memory loaded set
 	var b = (byte*)Marshal.GetHINSTANCE(m);
 	byte* p = b + *(uint*)(b + 0x3c);
           // pNtHeader
@@ -384,34 +384,34 @@ static unsafe void Initialize() {
 	for (int i = 0; i < s; i++) {
 		uint g = (*r++) * (*r++);
               // SectionHeader.Name => nameHash
-              // 此时r指向SectionHeader.VirtualSize
+              // At this point r points to SectionHeader.VirtualSize
 		if (g == (uint)Mutation.KeyI0) {
-                  // 查看Confuser.Protections.AntiTamper.NormalMode
-                  // 这里的Mutation.KeyI0是nameHash
-                  // 这个if的意思是判断是否为ConfuserEx用来存放加密后方法体的节
+                  // view Confuser.Protections.AntiTamper.NormalMode
+                  // here Mutation.KeyI0 nameHash
+                  // This if means to determine if it is the section that ConfuserEx uses to store the encrypted method body.
                   e = (uint*)(b + (f ? *(r + 3) : *(r + 1)));
-                  // f为true，e指向RawAddres指向的内容，反之指向VirtualAddress指向的内容
+                  // f is true, e points to what RawAddres points to and vice versa points to what VirtualAddress points to
 			l = (f ? *(r + 2) : *(r + 0)) >> 2;
-                  // f为true，l等于RawSize >> 2，反之等于VirtualSize >> 2
-                  // 不用关心为什么>> 2了，这个到了后面还会<< 2回去
+                  // f for true，l equal to RawSize >> 2，if true VirtualSize >> 2
+                  // Don't care why>> 2 now, this one will go back when it gets here
               }
               else if (g != 0) {
 			var q = (uint*)(b + (f ? *(r + 3) : *(r + 1)));
-                  // f为true，q指向RawAddres指向的内容，反之指向VirtualAddress指向的内容
+                  // f is true, q points to what RawAddres points to and vice versa points to what VirtualAddress points to
                   uint j = *(r + 2) >> 2;
-                  // l等于VirtualSize >> 2
+                  // l equal to VirtualSize >> 2
                   for (uint k = 0; k < j; k++) {
-                      // 比如VirtualSize=0x200，那这里就循环0x20次
+                      // VirtualSize=0x200，For example.
                       uint t = (z ^ (*q++)) + x + c * v;
 				z = x;
 				x = c;
 				x = v;
 				v = t;
-                      // 加密运算本身，不需要做分析
+                      // Encryption itself, no analysis required.
 			}
 		}
 		r += 8;
-              // 让下一次循环时r依然指向SectionHeader的开头
+              // Make the r still point to the beginning of the SectionHeader on the next loop
 	}
 
 	uint[] y = new uint[0x10], d = new uint[0x10];
@@ -423,22 +423,22 @@ static unsafe void Initialize() {
 		c = (v >> 7) | (v << 25);
 		v = (z >> 11) | (z << 21);
 	}
-          // 加密运算本身，不需要做分析
+          // Encryption itself, no analysis required
           Mutation.Crypt(y, d);
-          // 这里会ConfuserEx替换成真正的加密算法，大概是这样：
+          // ConfuserEx is replaced here with a real encryption algorithm, which would look something like this.
           // data[0] = data[0] ^ key[0];
           // data[1] = data[1] * key[1];
           // data[2] = data[2] + key[2];
           // data[3] = data[3] ^ key[3];
           // data[4] = data[4] * key[4];
           // data[5] = data[5] + key[5];
-          // 然后这样循环下去
+          // And so on and so forth.
 
           uint w = 0x40;
 	VirtualProtect((IntPtr)e, l << 2, w, out w);
 
 	if (w == 0x40)
-              // 防止被重复调用，出现重复解密导致破坏数据
+              // Prevent duplicate calls, where duplicate decryption leads to data destruction
 		return;
 
 	uint h = 0;
@@ -449,31 +449,31 @@ static unsafe void Initialize() {
 	}
 }
 ```
-上面是我注释的，实际上的解密写在了最末尾"*e ^= y[h & 0xf];"，前面一大坨代码都是计算出key和要解密数据的位置。
+The actual decryption is written at the end of "*e ^= y[h & 0xf];", which I annotated, with a big chunk of code that calculates the key and the location of the data to be decrypted.
 
-为什么可以解密？因为xor 2次相同的值，等于xor 0，比如123 ^ 456 ^ 456 == 123。
+Why is it decryptable? Because XOR 2 times the same value is equal to XOR 0, say 123 ^ 456 ^ 456 == 123.
 
-那么这段代码究竟解密了什么呢？
+So what exactly does this code decrypt?
 
-我们先了解一下元数据表的Method表
+Let's first understand the meta-table Method table
 
 ![dnSpy-Method-RVA](./dnSpy-Method-RVA.png)
 
-我用红框标记的RVA指向了方法体的数据，方法体里面存放了ILHeader ILCode LocalVar EH。
+The RVA marked in red points to the data in the method body, which holds the ILHeader ILCode LocalVar EH.
 
-ConfuserEx会修改RVA，让RVA指向另一个红框"章节 #0: 乱码"，这个Section专门存放了方法体（模块静态构造器和Anti Tamper本身的方法体不在这个节里面，否则都没法运行了）。
+ConfuserEx modifies the RVA so that it points to another red box, "Section #0: Garbled", which houses the method body (the module static constructor and Anti Tamper's own method body are not in this section, otherwise neither would work).
 
-ConfuserEx会加密这一个节的内容。因为模块静态构造器是比程序集入口点更优先执行的，所以模块静态构造器的第一条IL指令就是call void AntiTamper::Initialize()。
+ConfuserEx encrypts the content of this one section. Because the module static constructor is executed in preference to the assembly entry point, the first IL instruction for the module static constructor is call void AntiTamper::Initialize().
 
-在程序集运行时会首先执行这一条IL指令，其它方法都会被解密，程序就可以正常的运行下去了。
+This IL instruction is executed first when the set is run, all other methods are decrypted, and the program can run normally.
 
-这种方法比Hook JIT的兼容性好非常多，几乎不可能出现无法运行的问题。但是这种方法的强度也是远不如Hook JIT的。
+This approach is so much better than Hook JIT's compatibility that it's almost impossible to have problems that don't work. But this approach is also nowhere near as strong as Hook JIT's.
 
-### AntiTamperKiller成品
+### AntiTamperKiller finished product
 
-刚才我们已经分析完了Anti Tamper，如果你看懂了，你也能写出一个Anti Tamper的静态脱壳机（dnSpy Dump法是有可能损坏数据的，静态脱壳仅仅解密了一个节的数据）
+We've just finished analyzing the Anti Tamper, if you read it, you can also write a static stripper of the Anti Tamper (dnSpy Dump method is possible to corrupt the data, static stripping only decrypts one section of data)
 
-Anti Tamper脱壳机下载：
-链接: [https://pan.baidu.com/s/1IMWk7BywjVX1O2AsJ2qIrA](https://pan.baidu.com/s/1IMWk7BywjVX1O2AsJ2qIrA)密码: 9ywx
+Anti Tamper Download：
+Link: [https://pan.baidu.com/s/1IMWk7BywjVX1O2AsJ2qIrA](https://pan.baidu.com/s/1IMWk7BywjVX1O2AsJ2qIrA) password: 9ywx
 
-de4dot怎么用的这个就怎么用，支持ConfuserEx最大保护。
+This is how de4dot works, it supports ConfuserEx maximum protection.
