@@ -1,52 +1,52 @@
-# .NET控制流分析（二）-反混淆
+# NET Control Flow Analysis (II) - Anti-Muddling
 
-## 前言
+## Preface
 
-本来想分成2块写的，因为有一部分简单，还有一部分很难，非常难。但是想想还是算了，一篇文章写完也可以，因为都是和反混淆有关的内容。不过估计文章会非常长，字数非常多。
+It was going to be written in 2 pieces, because one part was easy and the other part was hard, very hard. But come to think of it, it's okay for an article to be written, because it's all about the anti-hype. But it's estimated that the article will be very long and the word count very high.
 
-这篇文章还是要按顺序看，文章前半部分讲的是简单的，后半部分是难的，并且需要前半部分的一些知识。
+This article is still to be read in order, the first half of the article is easy and the second half is hard and requires some knowledge from the first half.
 
-前半部分比较简单，会说一些比较通用的代码和思路。
+The first half is simpler and will talk about some of the more general code and ideas.
 
-后半部分更有征对性，实战讲解ConfuserEx的控制流混淆清除。为什么讲ConfuserEx的控制流混淆？因为我觉得ConfuserEx的控制流混淆是最难的，至少在我遇到的壳里面来说。其它壳都是一个简单的switch(num)，case里面一条num=x;就没了，而ConfuserEx的控制流混淆是线性的，下一个被执行的基本块与上一个被执行的基本块有关，无法静态解密switch混淆，必需虚拟执行。
+The second half of the game is more of a confrontation, with a real-world explanation of ConfuserEx's control flow confusion removal. Why ConfuserEx control flow confusion? Because I find ConfuserEx's control flow confusion to be the hardest, at least inside the shells I've encountered. The other shells are a simple switch(num), a num=x inside the case is gone, while the control flow obfuscation of ConfuserEx is linear, the next basic block to be executed is related to the last basic block to be executed, cannot statically decrypt the switch obfuscation, must be executed virtually.
 
-## 基础
+## Basic
 
-### 递归模型
+### Recursive model.
 
-很多时候一个方法里面会有try块，这样的话，一个方法块里面就会有小作用域，也就是那个try块。控制流混淆只会在同一个作用域里面进行混淆，没见过会跨作用域混淆的。什么意思的？
+Very often a method will have a try block inside it, in which case a method block will have a small scope, which is the try block. Control stream obfuscation is only obfuscated within the same scope, not across it. What does that mean?
 
 ![Alt text](./1.png)
 
-比如这个大的红框，就是一个作用域，try包括的地方可以看作一个整体，控制流混淆的时候不会把try这个整体拆成多个部分。而try内部是一个作用域，不是一个整体，可以拆成多个部分，继续混淆。
+The big red box, for example, is a scope, and the place where the try is included can be seen as a whole, and the control flow is confused without breaking the try into multiple parts. And inside the TRY is a scope, not a whole, that can be broken into multiple parts to continue the confusion.
 
-所以我们要写出Helper类能简化遍历每一个作用域来反混淆的操作。这个类就叫做BlockRecursiveModel，代码在这个系列的上一篇文章的附件里有。这里就截图看看大概样子。
+So we're going to write the Helper class to simplify the operation of iterating through each scope to counter obfuscate. This class is called BlockRecursiveModel and the code is in the appendix to the previous article in this series. Here's a screenshot of what it looks like.
 
-![Alt text](./2.png)
+![Alt text](. /2.png)
 
-### 块排序器
+### Block sequencer.
 
-为什么要排序？首先是减小代码体积，如果不排序，IL代码可能就会像这样，到处是无条件跳转指令br，让我们几乎无法阅读IL代码。
+Why sort? The first thing is to reduce the code size, if not sorted, the IL code might look like this, with unconditional jump instructions br everywhere, making it almost impossible to read the IL code.
 
-![Alt text](./3.png)
+![Alt text](. /3.png)
 
-而排序之后逻辑清晰很多：
+And the logic is much clearer after the sorting.
 
-![Alt text](./4.png)
+![Alt text](. /4.png)
 
-这只是一个非常简单的方法体。如果是复杂的方法体，代码会膨胀很多，排序显得非常重要。
+It's just a very simple body of methods. If it's a complex method body, the code will swell a lot and sequencing becomes very important.
 
-当然，排序只是对生成的指令流有影响，对我们分析树状结构的控制流，也就是分成块之后的控制流是没有影响的。
+Of course, sorting only has an effect on the generated instruction flow, it has no effect on the control flow after we analyze the tree structure, that is, the control flow after it is divided into blocks.
 
-分块之后无论是什么顺序储存在List&lt;T&gt;里面，结构其实都是一样的：
+After the chunks are stored in List&lt;T&gt;in whatever order, the structure is actually the same.
 
 ![Alt text](./5.png)
 
-这个是我写的工具，文章末尾会附上编译好的程序。
+This is the tool I wrote and the compiled program will be attached at the end of the article.
 
-有了刚才说的BlockRecursiveModel，块排序的代码其实非常简单，我们要先分析出在相同作用域内，块与块直接的引用关系，再使用拓扑排序就行了。有人会说拓扑排序只能排有向无环图，但是我们这里是可以使用拓扑排序的，至于为什么我就不解释了，自己试试就知道。
+With the BlockRecursiveModel just mentioned, the code for block sorting is actually very simple, we have to first analyze the direct reference relationship between block and block in the same scope, and then use the topological sorting. Some people may say that topological sorting can only be done with a ringless graph, but we can use topological sorting here, so I won't explain why, just try it myself.
 
-要分析引用关系，我们还是要先定义个额外信息，来储存我们分析的结果：
+To analyze the citation relationship, we still need to define an additional piece of information to store the results of our analysis.
 
 ``` csharp
 private sealed class BlockInfo {
@@ -62,7 +62,7 @@ private sealed class BlockInfo {
 }
 ```
 
-References表示的是引用，意思是会跳转到哪些块。
+References indicate references, meaning which blocks will be jumped to.
 
 ``` csharp
 private void AddXref(BasicBlock source, BasicBlock target) {
@@ -71,7 +71,7 @@ private void AddXref(BasicBlock source, BasicBlock target) {
 
 	targetRoot = target.GetRootBlock(_scope);
 	if (targetRoot == null)
-		// 跳出scope范围的我们不做处理
+		// We don't deal with the ones that go outside the scope.
 		return;
 	references = source.GetRootBlock(_scope).PeekExtraData<BlockInfo>().References;
 	if (!references.Contains(targetRoot))
@@ -95,9 +95,9 @@ public static IBlock GetRootBlock(this IBlock block, IBlock scope) {
 }
 ```
 
-代码里面的source代表会发生跳转的基本块，target表示会跳转到的基本块。
+The source in the code represents the base block to which the jump will occur and the target represents the base block to which the jump will occur.
 
-分析出所有引用关系之后，我们直接使用拓扑排序就行：
+After analyzing all the reference relationships, we can just use the topological sorting.
 
 ``` csharp
 private sealed class TopologicalSorter {
@@ -130,53 +130,53 @@ private sealed class TopologicalSorter {
 }
 ```
 
-整个排序的完整代码都在上一篇文章的附件的压缩包里面，叫BlockSorter.cs
+The complete code for the whole sorting is in the zip file attached to the previous post, called BlockSorter.cs
 
-### 移除NOP
+### Remove NOP
 
-移除NOP这个操作非常简单，因为我们已经转换成了块，遍历每个基本块块，把每个基本块的NOP都移除就好。
+Removing the NOP is very simple because we have already converted it to a block, iterate through each basic block and remove the NOP from each basic block.
 
-既然简单，那为什么还要提这个呢？
+If it's simple, then why even mention it?
 
-因为我们的目标是把所有情况尽可能的简化，变成一种情况，这样我们处理起来就方便很多。而NOP的存在可能会影响我们识别特征。
+Because our goal is to make all situations as simple as possible, into one situation so that we can handle it much easier. And the presence of the NOP may affect our ability to identify features.
 
-### 基本块内联
+### Basic block inline.
 
-什么叫内联，比如这样：
+What do you mean by inline, like this.
 
 ![Alt text](./6.png)
 
-红框中3个基本块就是可以内联到一起的，为什么呢？因为BLK_0002只被一个基本块引用了，BLK_0001也是，只被一个基本块引用，并且引用方是无条件跳转，那就可以内联起来。BLK_0004虽然只被一个基本块引用，但是引用方BLK_0002是条件跳转，我们就不能内联。
+The 3 basic blocks in the red box are what can be inline together, why? Because BLK_0002 is only referenced by a basic block, so is BLK_0001, which is only referenced by a basic block, and the referent is an unconditional jump, then we can inline. BLK_0004 is only referenced by a basic block, but the referent BLK_0002 is a conditional jump, we can not inline.
 
-内联之后：
+After the inline.
 
 ![Alt text](./7.png)
 
-是不是效果明显，控制流清晰了很多，没有冗余的东西？
+Isn't the effect noticeable, with a much clearer control flow and no redundancy?
 
-这里再扯一下我的FlowGraph，这个工具有个Optimization选项，开了之后就会把可以内联的块都内联到一起，并且清除NOP，对块进行排序。
+This tool has an Optimization option, which will inline all the blocks that can be inlined together, clear the NOP, and sort the blocks.
 
-除了这种情况，我们还有一种情况可以内联，就是某个基本块是空块，并且跳转指令是无条件跳转指令br。这种情况下，无论引用方有几个，引用方是什么跳转指令，我们都可以内联。
+In addition to this, we can also inline a case where a basic block is empty and the jump instruction is an unconditional jump instruction br. In this case, we can inline whatever jump instruction the referencing party has, regardless of how many referencing parties.
 
-比如这样的：
+For example.
 
 ![Alt text](./8.png)
 
-这里的BLK_0007就是一个空块（nop指令等于不存在，我们会优化掉），而且是跳转指令是无条件跳转指令br。虽然BLK_0007的引用方有BLK_0002 BLK_0003 BLK_0004 BLK_0005 BLK_0006共5个，但是我们都可以内联起来。
+Here BLK_0007 is an empty block (nop instruction equals non-existent, we'll optimize it out), and the jump instruction is the unconditional jump instruction br. Although BLK_0007 has BLK_0002 BLK_0003 BLK_0004 BLK_0005 BLK_0006 with 5 references, we can all inline it.
 
-内联起来的效果：
+Inline effect.
 
 ![Alt text](./9.png)
 
-而这一段控制流的源代码其实非常简单，就是Debug模式下编译一个switch+goto
+The source code of this control stream is actually very simple, it is a switch+goto compiled in Debug mode.
 
 ![Alt text](./10.png)
 
-脑补一下，这个代码生成是不是更像我们开了优化之后的控制流图？
+Just a side note, isn't this code generation more like the control flow diagram we have open after optimization?
 
-这个就是内联的牛逼之处，可以极大地简化控制流。虽然牛逼，但是实现就比上面地代码更复杂了。
+This is where the inline bull comes in and can greatly simplify the control flow. Although it's impressive, the implementation is more complex than the code above.
 
-实际上也没复杂多少，代码直接放出来，其实就200行。
+It's actually not much more complicated, the code is just put out, it's actually 200 lines.
 
 ``` csharp
 using System.Collections.Generic;
@@ -185,16 +185,16 @@ using dnlib.DotNet.Emit;
 
 namespace ControlFlow.Deobfuscation {
 	/// <summary>
-	/// 可以移除的基本块A，不移除可能会妨碍我们分析：
-	/// 1. 一个基本块A没有其它指令，只有br这个无条件跳转指令
-	/// 2. 一个基本块B无条件跳转到一个作用域相同的基本块A，且A只被B引用
+	/// Basic block A that can be removed, failure to remove may prevent us from analyzing.
+	/// 1. A basic block A has no other instructions, only the unconditional jump instruction br
+	/// 2. a base block B unconditionally jumps to a base block A with the same scope, and A is only referenced by B
 	/// </summary>
 	public sealed class BlockInliner : BlockRecursiveModel {
 		private BlockInliner(List<IBlock> blocks, IBlock scope) : base(blocks, scope) {
 		}
 
 		/// <summary>
-		/// 内联
+		/// inline
 		/// </summary>
 		/// <param name="methodBlock"></param>
 		/// <returns></returns>
@@ -203,7 +203,7 @@ namespace ControlFlow.Deobfuscation {
 
 			methodBlock.PushExtraDataAllBasicBlocks(() => new BlockInfo());
 			new BlockXref(methodBlock, AddXref).Analyze();
-			// 我们需要分析出所有块间的引用关系之后才能彻底完成内联
+			// We need to analyze all the reference relationships between the blocks before we can complete the inline
 			result = Execute(methodBlock, (blocks, scope) => new BlockInliner(blocks, scope));
 			methodBlock.PopExtraDataAllBasicBlocks();
 			return result;
@@ -229,24 +229,24 @@ namespace ControlFlow.Deobfuscation {
 			if (_blocks.Count < 2)
 				return false;
 			isModified = FixEntryBlockIfBrOnly();
-			// 如果作用域的入口（也就是作用域的第一个块）是空块，我们特殊处理
+			// If the entry to the scope (i.e. the first block of the scope) is an empty block, we specialize in
 			do {
 				for (int i = 1; i < _blocks.Count; i++) {
-					// 跳过入口块，这段代码处理不了入口块
+					// Skip the entry block. This code can't handle the entry block.
 					BasicBlock target;
 					BlockInfo targetInfo;
 
 					target = _blocks[i] as BasicBlock;
-					// target代表可能可以被合并的块
+					// target represents blocks that may be able to be merged
 					if (target == null)
-						// 作用域块不能合并到其它块
+						// Scope blocks cannot be merged to other blocks
 						continue;
 					targetInfo = target.PeekExtraData<BlockInfo>();
 					if (CanInline(target, targetInfo)) {
 						UpdateReferencesOfDereferences(target, targetInfo);
-						// 更新target反向引用的引用
+						// Update the TARGET reverse reference citation.
 						UpdateDereferencesOfReferences(target, targetInfo);
-						// 更新target引用的反向引用
+						// Update the back-reference of the TARGET reference
 						targetInfo.IsInlineed = true;
 					}
 				}
@@ -259,19 +259,19 @@ namespace ControlFlow.Deobfuscation {
 
 		private static bool CanInline(BasicBlock target, BlockInfo targetInfo) {
 			if (target.IsEmpty && target.BranchOpcode.Code == Code.Br) {
-				// 空的br跳转块，可以无条件合并
+				// Empty BR jump blocks that can be merged unconditionally
 				return true;
 			}
 			else {
 				BasicBlock dereference;
 
 				if (targetInfo.Dereferences.Count != 1)
-					// 当target只被一个块引用时才可以被内联
+					// A target can only be inlined when it is referenced by a block
 					return false;
 				dereference = targetInfo.Dereferences[0];
 				if (dereference.BranchOpcode.Code != Code.Br)
-					// 引用当前块的块必须为基本块，并且最后一条指令为br
-					// 如果为leave，表示反向引用来自其它作用域，target和反向引用不在同一作用域，这时我们不能对target进行内联
+					// The block that references the current block must be the base block, and the last instruction must be br
+					// If leave, it means that the back-reference is from another scope, target and back-reference are not in the same scope, then we cannot inline the target.
 					return false;
 				return true;
 			}
@@ -280,7 +280,7 @@ namespace ControlFlow.Deobfuscation {
 		private static void UpdateReferencesOfDereferences(BasicBlock target, BlockInfo targetInfo) {
 			foreach (BasicBlock dereference in targetInfo.Dereferences) {
 				if (dereference.BranchOpcode.Code == Code.Br) {
-					// br无条件跳转，直接内联基本块
+					// br unconditional jump, direct inline base block
 					if (!target.IsEmpty)
 						dereference.Instructions.AddRange(target.Instructions);
 					dereference.BranchOpcode = target.BranchOpcode;
@@ -289,7 +289,7 @@ namespace ControlFlow.Deobfuscation {
 					dereference.SwitchTargets = target.SwitchTargets;
 				}
 				else {
-					// 要逐个判断哪里使用了target
+					// To determine on a case-by-case basis where target is used
 					if (dereference.FallThrough == target)
 						dereference.FallThrough = target.FallThrough;
 					if (dereference.ConditionalTarget == target)
@@ -300,14 +300,14 @@ namespace ControlFlow.Deobfuscation {
 								dereference.SwitchTargets[j] = target.FallThrough;
 				}
 				ListReplace(dereference.PeekExtraData<BlockInfo>().References, target, targetInfo.References);
-				// 将target反向引用的引用中的target换成target的引用
+				// Replace the target in the reference of the target reverse reference with the target reference
 			}
 		}
 
 		private static void UpdateDereferencesOfReferences(BasicBlock target, BlockInfo targetInfo) {
 			foreach (BasicBlock reference in targetInfo.References)
 				ListReplace(reference.PeekExtraData<BlockInfo>().Dereferences, target, targetInfo.Dereferences);
-			// 将target引用的反向引用中的target换成target的反向引用
+			// Replace the target in the back reference of the target reference with the back reference of the target
 		}
 
 		private static void ListReplace<T>(List<T> list, T oldItem, List<T> newItems) {
@@ -335,8 +335,8 @@ namespace ControlFlow.Deobfuscation {
 			fallThroughRoot = GetNonBrOnlyFallThrough(entryBlock).GetRootBlock(_scope);
 			_blocks[_blocks.IndexOf(fallThroughRoot)] = entryBlock;
 			_blocks[0] = fallThroughRoot;
-			// 我们只交换入口基本块和br-only最终到达的块的位置
-			// 所以FixEntryBlockIfBrOnly必须在最开始被调用，然后当前作用域块的入口才能被修复
+			// We only exchange the location of the entry base block and the block that br-only eventually arrives
+			// So FixEntryBlockIfBrOnly must be called at the beginning, and then the current scope block's entry can be fixed
 			return false;
 		}
 
@@ -384,17 +384,17 @@ namespace ControlFlow.Deobfuscation {
 }
 ```
 
-还是再强调一下，控制流分析系列的文章肯定不会简单，走马观花地看是不行的，要完全地看懂上面贴出的代码，还是要自己编译上面的代码（放到上一篇文章放出的源码里面编译），到VS里面单步调试，一点一点看完整的流程。
+Still emphasize again, the control flow analysis series of articles will certainly not be simple, it is not possible to look at it from a horse's eye, to fully understand the code posted above, or to compile the above code (put the source code released in the previous article compiled), to VS inside the single-step debugging, little by little to see the complete process.
 
-### 标准化
+### Standardization
 
-之前写的3个小节，都是标准化需要的操作。什么是标准化？把控制流化简到最简，就是标准化。对控制流进行标准化之后，我们匹配特征将会非常的容易，清理效果可以提升很多。
+The 3 previously written vignettes are all operations required for standardization. What is standardization? Keeping control flowing down to the bare minimum is standardization. After standardizing the control flow, it will be very easy for us to match features, and the cleanup effect can be much improved.
 
-代码：
+Code.
 
 ``` csharp
 /// <summary>
-/// 创建标准化的方法块
+/// Creating standardized method blocks
 /// </summary>
 /// <param name="methodDef"></param>
 /// <returns></returns>
@@ -410,7 +410,7 @@ public static MethodBlock CreateStandardMethodBlock(this MethodDef methodDef) {
 }
 
 /// <summary>
-/// 对方法块进行标准化（移除NOP，内联，排序）
+/// Standardize method blocks (remove NOP, inline, sort)
 /// </summary>
 /// <param name="methodBlock"></param>
 public static void Standardize(this MethodBlock methodBlock) {
@@ -419,70 +419,70 @@ public static void Standardize(this MethodBlock methodBlock) {
 
 	NopRemover.Remove(methodBlock);
 	BlockSorter.Sort(methodBlock);
-	// 这里不是为了排序，而是为了清除无效块，否则BlockInliner内联可能不彻底
+	// The purpose here is not to sort, but to remove invalid blocks, otherwise the BlockInliner inline may not be thorough
 	BlockInliner.Inline(methodBlock);
 	BlockSorter.Sort(methodBlock);
-	// 拓扑排序
+	// topological order (math.)
 }
 ```
 
-## Switch混淆
+## Switch confusion.
 
-我目前遇到的最难的控制流混淆应该就是ConfuserEx的Switch混淆，能搞定ConfuserEx的Switch混淆，其它控制流混淆应该没问题了，所以这里只讲ConfuserEx。编译好的工具文章末尾也有。
+I currently encountered the most difficult control flow confusion should be ConfuserEx Switch confusion, can handle ConfuserEx Switch confusion, other control flow confusion should be no problem, so here only ConfuserEx. compiled tools at the end of the article also have.
 
-ConfuserEx的控制流混淆有很多种模式，这里只说ConfuserEx-GUI加出的控制流混淆，也就是Switch-Normal模式。其它模式可以看官方文档 [Control Flow Protection - Wiki](https://github.com/yck1509/ConfuserEx/wiki/Control-Flow-Protection)。其它模式的反混淆，原理都差不多的，就不重复讲了。
+ConfuserEx control flow obfuscation has many modes, here only ConfuserEx-GUI added control flow obfuscation, also known as Switch-Normal mode. Other modes can be found in the official documentation [Control Flow Protection - Wiki](https://github.com/yck1509/ConfuserEx/wiki/Control-Flow-Protection). The other models of anti-mixing, the principles of which are similar, will not be repeated.
 
-然后关于ConfuserEx的一些Mod版本，控制流混淆的变化都不是特别大，反混淆原理也是相同的。
+Then regarding some Mod versions of ConfuserEx, none of the changes in control stream obfuscation are particularly large, and the anti-obfuscation principle is the same.
 
-### 分析
+### Analysis.
 
-找个ConfuserEx加控制流混淆的程序，用dnSpy先看看特征。
+Find a ConfuserEx plus control flow obfuscation program and use dnSpy to see the features first.
 
 ![Alt text](./11.png)
 
-很明显的，这种不能静态解密，要跳转到的下一个case与上一个case有关。dnSpy看着有2个局部变量控制着控制流，事实上是这样吗？
+Obviously, this can't be statically decrypted, the next case to jump to is related to the previous case. dnSpy looks at 2 local variables controlling the control flow, is that actually the case?
 
-不是！其中有一个num是反编译器生成的。
+No! One of these NUMs is decompiler generated.
 
-我们看看IL：
+Let's look at IL.
 
 ![Alt text](./12.png)
 
 ![Alt text](./13.png)
 
-只用到了局部变量V_1。
+Only the local variable V_1 was used.
 
-为什么ConfuserEx生成的控制流混淆里面的常量都特别的大？关键还是一个求余运算，比如 x % 7，那么结果的取值范围就是{0, 1, 2, 3, 4, 5, 6}，恰好7个结果。
+Why are the constants in the control stream mix generated by ConfuserEx particularly large? The key is still a residual operation, such as x % 7, then the range of results is {0, 1, 2, 3, 4, 5, 6}, which is exactly 7 results.
 
 ![Alt text](./14.png)
 
-比如这个switch，有7个条件跳转目标，那么就是% 7，也就是除以7求余数。
+In this switch, for example, there are 7 conditional jump targets, then it is % 7, that is, divide by 7 for the remainder.
 
-我们还会注意到，对num赋值有2种情况，一种是和num本身的值有关的，一种是无关的：
+We will also note that there are 2 cases of assigning values to num, one related to the value of num itself and one unrelated.
 
 ![Alt text](./15.png)
 
-为什么会出现直接一条num = ????;就完事的代码呢？全部使用上下文相关，也就是线性编码不是强度更高么？这个肯定不是ConfuserEx作者故意的，这个也是有原因的。我们可以看看ConfuserEx源码，在这里可以找到答案：
+Why is there a direct num = ??????? ;and you're done with the code? Isn't it stronger to use contextual, i.e. linear, coding all the time? This one was certainly not intentional by the ConfuserEx author, and there's a reason for that. We can look at the ConfuserEx source code and find the answer here.
 
 ![Alt text](./16.png)
 
 ![Alt text](./17.png)
 
-这段代码的意思是，如果一个基本块A有未知来源，意思就是有非已知的基本块会跳转基本块A，那么就不生成线性解码的代码。因为如果是一个未知的基本块跳转到了基本块A，那么此时的num的值是不确定的，如果还是用num = num * xxxx ^ xxxx;，就会导致解码出的num是错误的。
+This code means that if a base block A has an unknown source, meaning that there are non-known base blocks that jump to base block A, then no linearly decoded code is generated. Because if it is an unknown base block that jumps to base block A, then the value of num at this point is uncertain, and if we still use num = num * xxxx ^ xxxx;, it will cause the decoded num to be wrong.
 
-所以我们可以得出这种线性Switch混淆的一个结论：
+So one conclusion we can draw from this linear Switch confusion is this
 
 ![Alt text](./18.png)
 
-线性Switch混淆就像图中一坨混在一起的线，直接进入内部，是清理不了混淆的。而线性Switch混淆有且至少有一个为未知源准备的入口点，也就是图中箭头指着的几个很细的线条，也就是ConfuserEx Switch混淆中的直接对num进行赋值的地方。
+Linear Switch confusion is like a pile of mixed up lines in the diagram that go straight to the inside and won't clean up the confusion. The linear Switch obfuscation has and has at least one entry point for the unknown source, which is the few fine lines pointed by the arrows in the figure, which is where the ConfuserEx Switch obfuscation is assigned directly to num.
 
-我们再用工具FlowGraph看看（开了优化的）：
+Let's take a look at the tool FlowGraph (with optimization turned on).
 
 ![Alt text](./19.png)
 
-蓝色框圈出来的就是这个线性Switch的一个入口点。
+The blue box circled out is an entry point for this linear Switch.
 
-我们可以再看看其它方法体，也是如此：
+We can look again at other bodies of methods, and the same is true.
 
 ![Alt text](./20.png)
 
@@ -490,21 +490,21 @@ ConfuserEx的控制流混淆有很多种模式，这里只说ConfuserEx-GUI加�
 
 ![Alt text](./22.png)
 
-和之前总结的特征一样。
+Same features as previously summarized.
 
-所以，我们要清理线性Switch混淆，只能从这种入口点进入，虚拟执行部分代码，才可以达到效果。
+So we have to clean up the linear Switch obfuscation, which can only be achieved by entering from this entry point and executing part of the code virtually.
 
-### 虚拟机
+### Virtual Machine
 
-虚拟执行需要虚拟机。虽然有现成的虚拟机，比如de4dot.blocks里面的虚拟机，但是我就是喜欢造轮子，自己写的用着舒服，修改起来也方便，看别人的代码太累了，看懂了还要自己修改，不如从头写一个。
+Virtual execution requires a virtual machine. Although there are ready-made virtual machines, such as the virtual machine in de4dot.blocks, but I just like to build wheels, write them myself and use them comfortably and easily to modify them.
 
-虚拟机完整代码文章末尾也有。
+Also at the end of the Virtual Machine Full Code article.
 
-#### 操作码分类
+#### Opcode classification
 
-我们可以先对所有指令操作码进行分类，对我们需要的操作码进行模拟，不需要的就不模拟。
+We can start by classifying all the command opcodes, simulating the ones we need, and not simulating the ones we don't.
 
-这里我贴上我分类好的：
+Here I post what I sorted.
 
 ``` csharp
 Add
@@ -528,7 +528,7 @@ Sub
 Sub_Ovf
 Sub_Ovf_Un
 Xor
-// 运算
+// calculate
 
 Ceq
 Cgt
@@ -536,7 +536,7 @@ Cgt_Un
 Ckfinite
 Clt
 Clt_Un
-// 判断
+// judgment
 
 Box
 Castclass
@@ -575,7 +575,7 @@ Conv_U4
 Conv_U8
 Unbox
 Unbox_Any
-// 转换
+// convert
 
 Dup
 Ldarg
@@ -646,7 +646,7 @@ Stind_Ref
 Stloc
 Stobj
 Stsfld
-// 取值赋值
+// take a value and assign a value
 
 Beq
 Bge
@@ -668,12 +668,12 @@ Ret
 Rethrow
 Switch
 Throw
-// 分支
+// branch
 
 Call
 Calli
 Callvirt
-// 调用
+// call
 
 Arglist
 Cpblk
@@ -686,22 +686,22 @@ Mkrefany
 Refanytype
 Refanyval
 Sizeof
-// 其它
+// other
 ```
 
-比如处理ConfuserEx控制流混淆，我们实现部分取值赋值，分配指令的虚拟化，还有所有运算指令的虚拟化就够了，非常简单。
+For example, to deal with ConfuserEx control flow obfuscation, we implement partial value assignment, virtualization of assignment instructions, and virtualization of all operation instructions is enough, very simple.
 
-#### 虚拟值
+#### virtual value
 
-我把虚拟机中的值分成了几种常见类型：
-
+I have divided the values in the virtual machine into several common types.
+值标志
 ![Alt text](./23.png)
 
-再写一个一个接口，表示虚拟值就行。
+Just write one more interface representing the virtual value.
 
 ``` csharp
 /// <summary>
-/// 值标志
+/// value symbol
 /// </summary>
 public enum ValueType {
 	/// <summary>
@@ -711,7 +711,7 @@ public enum ValueType {
 
 	/// <summary>
 	/// <see cref="bool"/>, <see cref="sbyte"/>, <see cref="byte"/>, <see cref="short"/>, <see cref="ushort"/>, <see cref="int"/>, <see cref="uint"/>
-	/// 在CLR内最小单位是4字节
+	/// The minimum unit in the CLR is 4 bytes.
 	/// </summary>
 	Int32,
 
@@ -721,83 +721,83 @@ public enum ValueType {
 	Int64,
 
 	/// <summary>
-	/// 空值，使用 <see cref="AnyValue"/> 表示
+	//// null value, using <see cref="AnyValue"/>
 	/// </summary>
 	Null,
 
 	/// <summary>
-	/// 未知值，使用任意继承自 <see cref="IValue"/> 的类型表示
-	/// 比如使用 <see cref="Int32Value"/> 类表示，意思是类型为 <see cref="Int32Value"/>，但是值不确定
+	/// Unknown value, represented by an arbitrary inheritance from <see cref="IValue"/> type
+	/// for example using <see cref="Int32Value"/> class representation, meaning type <see cref="Int32Value"/> but the value is uncertain
 	/// </summary>
 	Unknown,
 
 	/// <summary>
-	/// 数组，使用 <see cref="AnyValue"/> 表示。<see cref="AnyValue.Value"/> 将为 <see cref="IValue"/> 的数组
+	/// Array, represented by <see cref="AnyValue"/>. <see cref="AnyValue.Value"/> will be an array of <see cref="IValue"/>
 	/// </summary>
 	Array,
 
 	/// <summary>
-	///用户定义类型
+	///User-defined type
 	/// </summary>
 	User
 }
 
 /// <summary>
-/// 表示一个值
+/// represent a value
 /// </summary>
 public interface IValue {
 	/// <summary>
-	/// 标志
+	/// mark
 	/// </summary>
 	ValueType Type { get; set; }
 
 	/// <summary>
-	/// 值类型返回 this 指针，引用类型深度克隆自身
+	/// value type returns this pointer, referencing the type depth clone itself
 	/// </summary>
 	/// <returns></returns>
 	IValue Clone();
 }
 ```
 
-#### 架构
+#### structure
 
-我用的是de4dot.blocks里面的架构，稍微修改了一下，把虚拟机和上下文（Context）本身分离了。
+I'm using the architecture inside de4dot.blocks, slightly modified to separate the virtual machine from the context itself.
 
 ``` csharp
 /*
- * 虚拟机本身参考了de4dot的设计
+ * The virtual machine itself references the design of de4dot
  * 
- * 以下代码应与ControlFlow.Blocks项目没有任何关系
- * 转换部分应该由扩展类Extensions完成
- * 模拟器Emulator类只需要完成模拟的功能，不需要关心是什么样的Block
- * 也不需要关心异常处理块是什么样的
- * 只需要返回失败，由用户进行判断和处理
- * 用户需要判断是何种原因造成了模拟的失败
- * 
- * 这个项目和ControlFlow.Blocks项目一样
- * 需要先使用ControlFlow.Blocks.Extensions.SimplifyMacros(MethodDef)化简指令
- * 否则可能模拟失败
+ * The following code should have no relationship to the ControlFlow.Blocks project
+ * The conversion should be done by Extensions
+ * Simulator Emulator class only needs to do the function of simulation, not care what kind of Block it is
+ * Nor do they need to care what the exception block looks like
+ * Need only to return failures, to be judged and processed by the user
+ * The user needs to determine what caused the simulation to fail
+ *
+ * This project is the same as the ControlFlow.Blocks project
+ * Need to first use ControlFlow.Blocks.Extensions.SimplifyMacros (MethodDef) to streamline instructions
+ * Otherwise the simulation may fail
  */
 
 /// <summary>
-/// 模拟器上下文
+/// Simulator context
 /// </summary>
 public sealed class EmulationContext {
 	private readonly Dictionary<Local, IValue> _variables;
 	private readonly Stack<IValue> _evaluationStack;
 
 	/// <summary>
-	/// 局部变量
+	/// local variable
 	/// </summary>
 	public Dictionary<Local, IValue> Variables => _variables;
 
 	/// <summary>
-	/// 计算堆栈
+	/// compute stack (computing)
 	/// </summary>
 	public Stack<IValue> EvaluationStack => _evaluationStack;
 
 	/// <summary>
-	/// 构造器
+	/// constructor
 	/// </summary>
 	public EmulationContext() {
 		_evaluationStack = new Stack<IValue>();
@@ -805,7 +805,7 @@ public sealed class EmulationContext {
 	}
 
 	/// <summary>
-	/// 构造器
+	/// constructor
 	/// </summary>
 	/// <param name="variables"></param>
 	public EmulationContext(IEnumerable<Local> variables) : this() {
@@ -827,7 +827,7 @@ public sealed class EmulationContext {
 	}
 
 	/// <summary>
-	/// 克隆当前实例
+	/// Cloning the current instance
 	/// </summary>
 	/// <returns></returns>
 	public EmulationContext Clone() {
@@ -847,7 +847,7 @@ public sealed class EmulationContext {
 }
 
 /// <summary>
-/// 模拟器结果
+/// Simulator results
 /// </summary>
 public sealed class EmulationResult {
 	private readonly bool _success;
@@ -855,17 +855,17 @@ public sealed class EmulationResult {
 	private readonly Exception _exception;
 
 	/// <summary>
-	/// 是否成功
+	/// success or failure
 	/// </summary>
 	public bool Success => _success;
 
 	/// <summary>
-	/// 模拟失败的指令
+	/// Simulate a failed command.
 	/// </summary>
 	public Instruction FailedInstruction => _failedInstruction;
 
 	/// <summary>
-	/// 异常（如果有）
+	/// Anomalies (if any)
 	/// </summary>
 	public Exception Exception => _exception;
 
@@ -877,9 +877,9 @@ public sealed class EmulationResult {
 }
 ```
 
-给虚拟机一个上下文，传入要虚拟执行的指令，返回执行结果，就是这么简单，并不复杂。
+Giving the virtual machine a context, passing in the instructions to be executed virtually, returning the results of the execution, is that simple, not complicated.
 
-比如我们要虚拟执行运算指令，我们要用好C#的lambda。
+For example, if we want to execute operations virtually, we need to use lambda in C#.
 
 ``` csharp
 private bool Template_Arithmetic(Func<int, int, int> operation32, Func<long, long, long> operation64) {
@@ -931,7 +931,7 @@ private static long GetInt64_Arithmetic(IValue value) {
 }
 ```
 
-要模拟运算指令，调用Template_Arithmetic就行，非常简单。
+To simulate an arithmetic instruction, just call Template_Arithmetic, it's very simple.
 
 ``` csharp
 protected virtual bool Emulate_Add(Instruction instruction) {
@@ -947,28 +947,28 @@ protected virtual bool Emulate_Div(Instruction instruction) {
 }
 ```
 
-剩下的非常简单，就是大循环套着Switch判断操作码，然后调用对应的方法进行虚拟执行，代码不贴了。
+The rest is very simple, it's just a big loop with a Switch judgment opcode, and then call the corresponding method for virtual execution, the code is not posted.
 
-### 清除
+### Clear.
 
-有了虚拟机之后，我们要清除Switch混淆就方便很多了。我们可以开始清除Switch混淆了。
+With a virtual machine, it's a lot easier for us to clear the Switch confusion. We can start clearing the Switch confusion now.
 
-先把部分情况进行特殊处理。
+Part of the situation was first given special treatment.
 
-ConfuserEx会把条件跳转指令转换成这样的形式：
+ConfuserEx translates the conditional jump instruction into this form.
 
 ![Alt text](./24.png)
 
 ![Alt text](./25.png)
 
-这里的dup和pop就是ConfuserEx故意干扰我们的代码，这里的dup和pop完全可以直接移除。
+The dup and pop here is ConfuserEx's intentional interference with our code, and the dup and pop here are completely removable.
 
-移除这种dup和pop的核心代码（其它代码没贴，了解个思路就行）：
+Remove the core code for this dup and pop (other code not posted, just get a thought).
 
 ``` csharp
 private void HandleMultiDupWithOnePop(BasicBlock popBlock) {
-	// 我们暂时只处理这种情况，多个dup块对应单个pop块（ConfuserEx）
-	// 还没见到单个dup块对应多个pop块的
+	// We will only deal with this case for the time being, multiple dup blocks correspond to a single pop block (ConfuserEx)
+	// Haven't seen a single DUP block corresponding to multiple POP blocks
 	int popCount;
 	List<BasicBlock> dupBlocks;
 	int dupCount;
@@ -977,13 +977,13 @@ private void HandleMultiDupWithOnePop(BasicBlock popBlock) {
 	if (popCount == 0)
 		return;
 	dupBlocks = popBlock.PeekExtraData<BlockInfo>().Dereferences;
-	// 假设反向引用都有dup
+	// Let's say the reverse references all have dups.
 	if (dupBlocks.Count == 0)
-		// 作用域入口点可能没有反向引用，比如方法块入口点，Catch块入口点
+		// Scene entry points may not be back-referenced, e.g. method block entry points, Catch block entry points
 		return;
 	foreach (BasicBlock dupBlock in dupBlocks)
 		if (dupBlock.BranchOpcode.Code != Code.Br)
-			// 必须是无条件跳转到pop块
+			// Must be an unconditional jump to the POP block.
 			return;
 	dupCount = int.MaxValue;
 	foreach (BasicBlock dupBlock in dupBlocks) {
@@ -993,43 +993,43 @@ private void HandleMultiDupWithOnePop(BasicBlock popBlock) {
 		if (temp < dupCount)
 			dupCount = temp;
 	}
-	// 找出最小dup数量
+	// Find the minimum number of dups
 	if (dupCount == 0)
 		return;
 	if (popCount < dupCount)
 		dupCount = popCount;
-	// 找出最小配对的dup-pop数量
+	// Find the minimum number of dup-pop pairs
 	popBlock.Instructions.RemoveRange(0, dupCount);
-	// pop块移除开头的pop
+	// pop block removes the pop at the beginning
 	foreach (BasicBlock dupBlock in dupBlocks)
 		dupBlock.Instructions.RemoveRange(dupBlock.Instructions.Count - dupCount, dupCount);
-	// dup块移除结尾的dup
+	// dup block removes dup at the end
 	_dupCount += dupCount;
 }
 ```
 
-和之前的BlockInliner一样，我们还要对ConfuserEx混淆过的If进行内联，方便我们标记要模拟的指令来进行清理。
+As with the previous BlockInliner, we also need to inline ConfuserEx's confused ifs so that we can mark the commands to be simulated for cleanup.
 
 ![Alt text](./26.png)
 
-比如这种，红框中的基本块可以内联到上面2个基本块中。
+In this case, for example, the basic blocks in the red box can be inline to the 2 basic blocks above.
 
-我们要先定义一个抽象类，写清理线性Switch混淆的逻辑，而识别部分放到子类里面进行实现，达到代码复用。
+We have to first define an abstract class, write to clean up the logic of linear Switch confusion, and identify the part put into the subclass to implement, to achieve code reuse.
 
-抽象类的代码我直接贴上来了：
+I'll just post the code for the abstract class.
 
 ``` csharp
 /// <summary>
-/// 线性Switch反混淆（比如ConfuserEx）
-/// 我们一次只清理一个线性Switch，否则代码会极其复杂
+/// Linear Switch anti-aliasing (e.g. ConfuserEx)
+/// We clean one linear Switch at a time, otherwise the code would be extremely complex
 /// </summary>
 public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 	/// <summary>
-	/// 指令模拟器
+	/// Instruction Simulator
 	/// </summary>
 	protected readonly Emulator _emulator;
 	/// <summary>
-	/// Switch块
+	/// Switch blocks
 	/// </summary>
 	protected BasicBlock _switchBlock;
 	private bool _isModified;
@@ -1058,22 +1058,22 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 	}
 
 	/// <summary>
-	/// 访问指定基本块，并且通过递归访问这个基本块的所有跳转目标
+	/// Access the specified base block and recursively access all jump targets for this base block
 	/// </summary>
 	/// <param name="basicBlock"></param>
 	protected void VisitAllBasicBlocks(BasicBlock basicBlock) {
 		BlockInfoBase blockInfo;
 
 		if (basicBlock.Scope != _scope)
-			// 指定基本块不在当前作用域，不需要继续访问了
+			// Specify that the base block is not in the current scope and no further access is required
 			return;
 		blockInfo = basicBlock.PeekExtraData<BlockInfoBase>();
 		if (blockInfo.IsVisited && basicBlock != _switchBlock)
-			// 如果基本块已经访问过并且基本块不是Switch块，直接返回
+			// If the base block has been accessed and the base block is not a Switch block, return directly
 			return;
 		blockInfo.IsVisited = true;
 		if (blockInfo.EmulationInfo != null) {
-			// 如果需要模拟
+			// If a simulation is required.
 			EmulationInfo emulationInfo;
 			EmulationResult emulationResult;
 
@@ -1082,16 +1082,16 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 			emulationResult = _emulator.Emulate(basicBlock.Instructions, emulationInfo.StartIndex, emulationInfo.Length);
 			_isModified |= OnEmulateEnd(basicBlock);
 			if (!emulationResult.Success)
-				throw new NotImplementedException("暂未实现模拟失败处理，需要更新反混淆模型，或者检查是否模拟了不需要模拟的指令");
+				throw new NotImplementedException ("No simulation failure handling yet, need to update the anti-aliasing model, or check if instructions that do not need to be simulated are simulated");
 		}
 		if (basicBlock == _switchBlock)
-			// 我们要设置下一个要访问的基本块
+			// We're going to set up the next basic block to access.
 			VisitAllBasicBlocks(GetNextBasicBlock());
 		else
-			// 如果不是Switch块，我们使用递归访问下一个基本块
+			// If not a Switch block, we use recursive access to the next base block
 			switch (basicBlock.BranchOpcode.FlowControl) {
 			case FlowControl.Branch:
-				// 无条件跳转，不需要备份当前模拟器上下文
+				// unconditional jump, no need to back up the current simulator context
 				VisitAllBasicBlocks(basicBlock.FallThrough);
 				break;
 			case FlowControl.Cond_Branch:
@@ -1101,40 +1101,40 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 	}
 
 	/// <summary>
-	/// 在所有操作开始前触发
-	/// 在这个方法中，必需为 _blocks 中所有基本块添加额外信息，并且设置字段 <see cref="_switchBlock"/>
-	/// 如果没有找到Switch块，直接返回，而不是抛出异常
+	/// Triggered before all operations start.
+	/// In this method, it is necessary to add additional information to all basic blocks in _blocks and set the field <see cref="_switchBlock"/>
+	/// If no Switch block is found, return directly instead of throwing an exception
 	/// </summary>
 	protected abstract void OnBegin();
 
 	/// <summary>
-	/// 在所有操作完成后触发
-	/// 在这个方法中，必需移除 _blocks 中所有基本块的额外信息
+	/// Triggered upon completion of all operations.
+	/// In this method, it is necessary to remove all additional information from the basic blocks in _blocks
 	/// </summary>
 	protected abstract void OnEnd();
 
 	/// <summary>
-	/// 获取可用的模拟入口点
+	/// Access to available simulated entry points
 	/// </summary>
 	/// <returns></returns>
 	protected abstract IEnumerable<BasicBlock> GetEntries();
 
 	/// <summary>
-	/// 在指定基本块模拟前触发，返回当前基本块是否修改
+	/// Triggered before the specified base block is simulated, returns whether the current base block is modified
 	/// </summary>
 	/// <param name="basicBlock"></param>
 	/// <returns></returns>
 	protected abstract bool OnEmulateBegin(BasicBlock basicBlock);
 
 	/// <summary>
-	/// 在指定基本块模拟后触发，返回当前基本块是否修改
+	/// Triggered after specifying a base block simulation, returns whether the current base block is modified
 	/// </summary>
 	/// <param name="basicBlock"></param>
 	/// <returns></returns>
 	protected abstract bool OnEmulateEnd(BasicBlock basicBlock);
 
 	/// <summary>
-	/// 在遇到Switch块后，通过模拟器获取下一个基本块
+	/// After encountering a Switch block, get the next basic block via the simulator
 	/// </summary>
 	/// <returns></returns>
 	protected virtual BasicBlock GetNextBasicBlock() {
@@ -1147,18 +1147,18 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 	}
 
 	/// <summary>
-	/// 遇到条件跳转时，递归调用VisitAllBasicBlocks
+	/// Recursively call VisitAllBasicBlocks when experiencing a conditional jump
 	/// </summary>
-	/// <param name="basicBlock">为条件跳转的基本块</param>
+	/// <param name="basicBlock">Basic blocks for conditional jumps</param>
 	protected virtual void CallNextVisitAllBasicBlocksConditional(BasicBlock basicBlock) {
 		EmulationContext context;
 
 		context = _emulator.Context.Clone();
-		// 条件跳转，有多个跳转目标，需要备份当前模拟器上下文
+		// conditional jump, with multiple jump targets, requires backup of current simulator context
 		if (basicBlock.FallThrough != null) {
 			VisitAllBasicBlocks(basicBlock.FallThrough);
 			_emulator.Context = context;
-			// 恢复模拟器上下文
+			// Restore simulator context
 		}
 		if (basicBlock.ConditionalTarget != null) {
 			VisitAllBasicBlocks(basicBlock.ConditionalTarget);
@@ -1172,7 +1172,7 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 	}
 
 	/// <summary>
-	/// 基本块额外信息基类
+	/// Base block additional information base class
 	/// </summary>
 	protected abstract class BlockInfoBase {
 		/// <summary />
@@ -1181,7 +1181,7 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 		protected EmulationInfo _emulationInfo;
 
 		/// <summary>
-		/// 是否访问过这个基本块
+		/// Is this basic block accessed?
 		/// </summary>
 		public bool IsVisited {
 			get => _isVisited;
@@ -1189,8 +1189,8 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 		}
 
 		/// <summary>
-		/// 模拟相关信息
-		/// 如果需要模拟，将这个属性设置为非 <see langword="null"/>，反之保持默认，即为 <see langword="null"/>
+		/// Simulation-related information
+		/// If simulation is required, set this attribute to non- <see langword="null"/> and vice versa, <see langword="null"/>
 		/// </summary>
 		public EmulationInfo EmulationInfo {
 			get => _emulationInfo;
@@ -1199,24 +1199,24 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 	}
 
 	/// <summary>
-	/// 提供模拟所需信息
+	/// Provide the information required for the simulation
 	/// </summary>
 	protected sealed class EmulationInfo {
 		private readonly int _startIndex;
 		private readonly int _length;
 
 		/// <summary>
-		/// 从指定索引的指令开始模拟
+		/// Start the simulation with the instruction specifying the index.
 		/// </summary>
 		public int StartIndex => _startIndex;
 
 		/// <summary>
-		/// 要模拟的指令的数量
+		/// The number of instructions to be simulated
 		/// </summary>
 		public int Length => _length;
 
 		/// <summary>
-		/// 构造器
+		/// constructor
 		/// </summary>
 		/// <param name="startIndex"></param>
 		/// <param name="length"></param>
@@ -1228,9 +1228,9 @@ public abstract class LinearSwitchDeobfuscatorBase : BlockRecursiveModel {
 }
 ```
 
-代码不多，核心的部分还是在方法名带了VisitAllBasicBlocks的方法里。比如VisitAllBasicBlocks，就是模拟程序正常执行流程，遇到了Switch混淆的地方，就模拟执行，然后在OnEmulateEnd里面完成Switch混淆的解密。
+There is not much code, the core part is still in the method name with VisitAllBasicBlocks. For example, VisitAllBasicBlocks, is the normal execution process of the simulation program, encountered the Switch confusion, the simulation execution, and then OnEmulateEnd inside the completion of the Switch confusion decryption.
 
-做完那么多清理操作，ConfuserEx的Switch差不多原形毕露了，特征变得非常明显，我们继承LinearSwitchDeobfuscatorBase再识别一下特征就可以了。
+After doing so many cleanup operations, ConfuserEx Switch almost revealed the original shape, features became very obvious, we inherited LinearSwitchDeobfuscatorBase and then identify the features on it.
 
 ``` csharp
 public sealed class LinearSwitchDeobfuscator : LinearSwitchDeobfuscatorBase {
@@ -1244,7 +1244,7 @@ public sealed class LinearSwitchDeobfuscator : LinearSwitchDeobfuscatorBase {
 
 		isModified = false;
 		while (Deobfuscate(methodBlock, (blocks, scope) => new LinearSwitchDeobfuscator(blocks, scope, methodBlock.CreateEmulationContext()))) {
-			// 我们一次只能清除一个LinearSwitch，所以用while循环
+			// We can only clear one LinearSwitch at a time, so use while loop
 			methodBlock.Standardize();
 			isModified = true;
 		}
@@ -1257,7 +1257,7 @@ public sealed class LinearSwitchDeobfuscator : LinearSwitchDeobfuscatorBase {
 				_switchBlock = basicBlock;
 				break;
 			}
-		// 先寻找Switch块
+		// Find the Switch block first.
 		if (_switchBlock == null)
 			return;
 		foreach (BasicBlock basicBlock in _blocks.EnumerateAllBasicBlocks()) {
@@ -1356,20 +1356,20 @@ public sealed class LinearSwitchDeobfuscator : LinearSwitchDeobfuscatorBase {
 }
 ```
 
-这段代码中的清理部分在OnEmulateEnd，这个OnEmulateEnd很像一个Hook，我们在switch跳转到目标前截获当前的计算堆栈，得到switch(num)中的num，这样我们就可以知道上一个基本块要跳转到哪里了，然后我们把上一个基本块的跳转目标修改掉，就完成了一个清理操作。
+The cleanup part of this code is in OnEmulateEnd, this OnEmulateEnd is very much like a Hook, we intercept the current compute stack before the switch jumps to the target, get the num in switch(num), so we can know where the last basic block is going to jump to, then we modify the jump target of the last basic block, we are done with a cleanup operation.
 
-如果ConfuserEx的switch混淆加了N多层，我们还要再判断一次，是否真的是线性Switch，比如这样的，就不是线性Switch：
+If ConfuserEx's switch obfuscation adds N multilayers, we have to judge again whether it is really a linear switch, such as this one, is not a linear switch:.
 
 ![Alt text](./27.png)
 
-如果我们不先清理掉这些非线性的Switch就清理线性Switch，很可能导致出错。
+If we clean up the linear Switch without cleaning up these non-linear ones first, it's likely to cause errors.
 
-## 下载
+## Download
 
-控制流图绘制工具FlowGraph：[百度云](https://pan.baidu.com/s/1eCu6U0ZWsIwQBM3F9ZIcDw) 提取码：csb1
+Control FlowGraph: [Baidu Cloud](https://pan.baidu.com/s/1eCu6U0ZWsIwQBM3F9ZIcDw) Extraction code: csb1
 
-反混淆工具ConfuserExSwitchDeobfuscator：[百度云](https://pan.baidu.com/s/1Cesv95OBRb_llP4zQ_QbTQ) 提取码：6hvr
+Anti-obfuscation tool ConfuserExSwitchDeobfuscator: [Baidu Cloud](https://pan.baidu.com/s/1Cesv95OBRb_llP4zQ_QbTQ) Extraction code: 6hvr
 
-虚拟机ControlFlow.Emulation：[百度云](https://pan.baidu.com/s/10k372M1LAJQkg8Z6jsPPNw) 提取码：d687
+Emulation：[Baidu Cloud](https://pan.baidu.com/s/10k372M1LAJQkg8Z6jsPPNw) Extraction code：d687
 
-用来测试ConfuserExSwitchDeobfuscator的UnpackMe，我加了15层控制流混淆：[百度云](https://pan.baidu.com/s/1VegZtzj4avjIXS4qrWL8Bg) 提取码：xbj6
+To test UnpackMe for ConfuserExSwitchDeobfuscator, I added 15 layers of control flow confusion: [Baidu Cloud](https://pan.baidu.com/s/1VegZtzj4avjIXS4qrWL8Bg) Extraction code: xbj6
