@@ -22,17 +22,17 @@ The big red box, for example, is a scope, and the place where the try is include
 
 So we're going to write the Helper class to simplify the operation of iterating through each scope to counter obfuscate. This class is called BlockRecursiveModel and the code is in the appendix to the previous article in this series. Here's a screenshot of what it looks like.
 
-![Alt text](. /2.png)
+![Alt text](./2.png)
 
 ### Block sequencer.
 
 Why sort? The first thing is to reduce the code size, if not sorted, the IL code might look like this, with unconditional jump instructions br everywhere, making it almost impossible to read the IL code.
 
-![Alt text](. /3.png)
+![Alt text](./3.png)
 
 And the logic is much clearer after the sorting.
 
-![Alt text](. /4.png)
+![Alt text](./4.png)
 
 It's just a very simple body of methods. If it's a complex method body, the code will swell a lot and sequencing becomes very important.
 
