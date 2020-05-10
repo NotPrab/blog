@@ -1,68 +1,68 @@
-# .NET控制流分析（一）-入门
+# NET Control Flow Analysis (I) - A Primer
 
-## 前言
+## preamble
 
-新的一年又开始了，去年发的文章应该只算是基础，今年我们研究研究难的。我个人认为.NET下最难的3种保护应该是：
+The new year has begun again, and the articles posted last year should only be basic, this year we study the hard ones. Personally, I think the 3 most difficult protections under .NET should be.
 
-- IL级虚拟机
-- 控制流混淆
+- IL-class virtual machine
+- Control flow confusion
 - Jit Hook
 
-如果不解除这些保护，其中任意一种都会极大地阻碍我们使用dnSpy对一个程序集的分析。
+If these protections are not removed, either one of them will greatly hinder our analysis of an assemblage using dnSpy.
 
-今天我们来简单的入门一下我认为的难点之一"控制流"，入门控制流分析的前提是你要对IL有一定的了解。如果看懂了，那么恭喜你。对于一些简单的控制流混淆，你可以写出自己的反混淆工具了。如果没看懂，那也没关系，这个要慢慢来，我自己研究这个也花了些时间。读这篇文章千万不能走马观花，一定要打开vs，自己动手写代码，跟着文章一步一步来。
+Today we'll take a brief introduction to what I consider one of the difficulties of control flow, which presupposes that you have some knowledge of IL. If you read it, then congratulations. For some simple control stream obfuscation, you can write your own anti-obfuscation tool now. If I didn't read it, that's okay, this one takes its time, and it took me a while to study this myself. Don't read this article and don't go through the motions, be sure to open the VS, write your own code and follow the article step by step.
 
-之前我写控制流分析项目的目的只是学习控制流，想了解最底层的实现和原理。虽然有现成的项目，比如0xd4d大神，也就是dnSpy作者的de4dot.blocks，但是de4dot是GPLv3协议开源的，项目本身也不维护了，关键是项目里面也没几处注释。假如有什么BUG，只能自己修复，有时间读懂别人到达写了什么，是什么意思，不如自己写一个项目，从零开始写。
+Previously I wrote the Control Flow Analysis project just to learn about control flow and to understand the underlying implementation and principles. Although there are ready-made projects, such as the 0xd4d Big God, the dnSpy author of de4dot.blocks, de4dot is open source for the GPLv3 protocol, and the project itself is not maintained, the key is that there are few comments in the project. If there's a bug that you can only fix yourself and have time to read what someone else has written and what it means, why not write a project yourself and start from scratch?
 
-控制流这个东西非常抽象，<del>我也不是特别熟悉那些绘图的类库（主要还是懒，也没什么时间，没去学）</del>，所以我们只是使用最暴力最简单的方法，把控制流全部转化成字符串信息显示出来供我们调试。我记得在我发的以前的一个帖子里面，有位同学说希望有视频解说。正好控制流的讲解不是几行文字就可以说清楚的，所以我会录个视频，补充些文章里面说不清的东西。**今天上午学了下流图类库，文章末尾有把控制流画出来的代码！！！**
+The control flow thing is very abstract, and <del>I'm not particularly familiar with the drawing libraries (mostly lazy and don't have much time to learn them)</del>, so we just use the most violent and easy way to convert the control flow into a string of information for debugging. I remember in a previous post I made, a classmate said he wanted a video commentary. It just so happens that control flow is not something that can be explained in a few lines, so I'm going to make a video to add some things that can't be explained in the article. ** Learned the Lower Flow Chart class library this morning, and there is code at the end of the article to draw out the control flow!!!! **
 
-不知道大家发现没，文章标题带了个"（一）"。因为这个东西挺复杂的，一篇文章说完，写着累，看着也累。所以如果有时间的话，可能还会有"（二）"，"（三）"等等。
+I don't know if you've noticed, but the article has a "(a)" in the title. Because this stuff is kind of complicated, an article is tired to say, tired to write and tired to watch. So if there's time, there may be "(two)", "(three)", etc.
 
-这篇文章只是入门，不会涉及到任何控制流混淆，我们仅仅要搭建一个框架，能够分析出控制流，表示出控制流，并且把分析并处理后的结果反馈到方法体中。
+This article is just a primer and will not involve any control flow obfuscation, we just want to build a framework that can analyze the control flow, represent the control flow, and feed the results of the analysis and processing into the method body.
 
-整个项目代码比较多，去空行，注释，只有一个符号的行来算代码行数也有2k+。所以下面只会提到比较关键的代码，剩下的代码可以下载附件查看。附件的代码是完整的，直接添加到新建项目里面就可以用。
+The whole project code is more, go to empty lines, comments, only one symbol of the line to count the number of code lines is also 2k+. So only the more critical codes are mentioned below, the rest can be viewed by downloading the attachment. The attachment code is complete and can be added directly to the new project.
 
-视频地址：[https://www.bilibili.com/video/av42023976](https://www.bilibili.com/video/av42023976)
+Video Address.：[https://www.bilibili.com/video/av42023976](https://www.bilibili.com/video/av42023976)
 
-## 定义结构
+## defined structure
 
-**前排提醒：文章中定义的结构和de4dot.blocks中的略有区别，但思想是差不多的**
+**Front row reminder: the structure defined in the article is slightly different from that in de4dot.blocks, but the thinking is pretty much the same **
 
-建好一栋房子要做好框架，一个框架也要选好材料。我们要定义出一个结构，能够**无损**地把方法体中线性的指令流，异常处理子句，局部变量转换为更易于分析的结构。
+It takes a good frame to build a house, and a good choice of materials for a frame. We want to define a structure that can **non-destructively** transform linear instruction flows, exception handling clauses, and local variables in the method body into a more analytically friendly structure.
 
 ![Alt text](./1.png)
 
-比如IDA会在跳转前进行截断，成为一个代码片段，这个片段我们可以成为Block。我们可以通过各种跳转语句，把一个方法体转换成很多Block，也就是"块"。
+For example, IDA will be truncated before the jump to become a code snippet, this snippet we can become a Block, we can use various jump statements to convert a method body into many Blocks, that is, "blocks".
 
-当然，事情远没这么简单，我们回到.NET，可以发现.NET还有异常处理子句这种东西。
+Of course, things are far from that simple, and we go back to .NET and find that there is such a thing as an exception handling clause in .NET.
 
 ![Alt text](./2.png)
 
-比如图中2个红框，第一个是try，第二个是catch，如果try的执行正常，那么就不会进入catch，所以我们还需要依赖异常处理子句来对方法体进行分块。
+For example, there are 2 red boxes in the figure, the first one is try and the second one is catch, if the execution of try is normal, then it will not enter catch, so we also need to rely on the exception handling clause to chunk the method body.
 
-那么是不是这样就结束了呢？肯定不是的，一个try或者一个catch可以称为一个作用域，我们可以从更小范围的子作用域跳转到更大范围的父作用域，但是我们不能从更大范围的父作用域跳转到更小范围的子作用域。
+So is that the end of it? Definitely not, a TRY or a CATCH can be called a scope, we can jump from a smaller range of child scopes to a larger range of parent scopes, but we can't jump from a larger range of parent scopes to a smaller range of child scopes.
 
 ![Alt text](./3.png)
 
 ![Alt text](./4.png)
 
-第一张图的代码是非法的，而第二张图的代码是合法的。
+The code for the first graph is illegal, while the code for the second graph is legal.
 
-从IL层面来看，我们只能跳转到一个作用域的第一条语句，不能跳转到作用域的其它语句，什么意思呢？
+At the IL level, what does it mean that we can only jump to the first statement of a scope and not to other statements of the scope?
 
 ![Alt text](./5.png)
 
 ![Alt text](./6.png)
 
-第一张图的br跳转到的try块第二条语句，这样就是非法的。
+The first graph of the BR jumps to the second statement of the TRY block, such that it is illegal.
 
-要离开try块怎么办呢？使用[leave](https://docs.microsoft.com/zh-cn/dotnet/api/system.reflection.emit.opcodes.leave)指令。
+What to do to get out of the try block? use[leave](https://docs.microsoft.com/zh-cn/dotnet/api/system.reflection.emit.opcodes.leave)instruction。
 
-C#中为了防止出现这种情况，也就有了上文所说的"大范围不能进小范围，小范围可以进大范围"。
+In C#, to prevent this from happening, there is also the above-mentioned "large range can't go into small range, small range can go into large range".
 
-catch块不会被任何跳转指令直接引用，仅仅当try块内出现异常，才会进入catch块。
+The catch block is not directly referenced by any jump instruction and only goes into the catch block if an exception appears within the try block.
 
-至此，我们可以这样定义结构（部分代码已省略）：
+At this point, we can define the structure as follows (some code has been omitted).
 
 ``` csharp
 public enum ScopeBlockType {
@@ -175,23 +175,23 @@ public sealed class MethodBlock : ScopeBlock {
 }
 ```
 
-我对这段定义解释一下，这里有个很奇怪的BlockBase，还有ExtraData，这个ExtraData可以理解成附加数据，有时我们分析控制流，需要把一段数据和一个块绑定在一起，这时ExtraData就发挥作用了。因为不是绑定一次数据，可能有很多数据要绑定，所以我们需要Stack&lt;T&gt;，也就是栈类型，可以先进后出，非常符合我们的编程习惯，初始化时Push数据，要用时Peek，用完了Pop就好。
+Let me explain this definition, here is a very strange BlockBase, and ExtraData, this ExtraData can be understood as additional data, sometimes we analyze the control flow, need to bind a piece of data and a block together, this is when ExtraData comes into play. We need Stack&lt;T&gt;, which is the type of stack, can be first in, last out, very much in line with our programming habits, Push data when initializing, Peek when using, Pop when using is good.
 
-BasicBlock是最小的单元，叫做基本块。为了方便，如果基本块最后一条指令会改变控制流，我们会把基本块中最后一条指令删掉，赋值给字段_branchOpcode，然后把跳转目标赋值给_fallThrough，_conditionalTarget，_switchTargets。这样我们更新控制流间的跳转关系就变得方便了很多。
+BasicBlock is the smallest unit called a BasicBlock. To make it easier, if the last instruction in the base block changes the control flow, we delete the last instruction in the base block, assign it to the field _branchOpcode, and then assign the jump targets to _fallThrough, _conditionalTarget, _switchTargets. This makes it much easier for us to update the jump relationships between control flows.
 
-很多个基本块在一起，可以变成一个作用域块，也就是ScopeBlock。当然ScopeBlock也可以相互嵌套，比如一个ScopeBlock中包含另一个ScopeBlock。
+Many basic blocks together can be turned into one scope block, which is called a ScopeBlock, and of course the ScopeBlocks can be nested with each other, for example one ScopeBlock contains another ScopeBlock.
 
-## 指令流转换到块
+## Command flow to block
 
-小标题中的块就是指的我们之前定义的结构体，比如BasicBlock叫做基本块。
+The blocks in the subheading refer to the structure we defined earlier, for example BasicBlock is called Basic Block.
 
-再回到IDA显示的那张反汇编的控制流图上，我们可以发现，控制流其实是一副有向图。
+Returning to the disassembled control flow diagram shown by IDA, we can see that the control flow is actually a directional diagram.
 
 ![Alt text](./1.png)
 
-这副有向图可能有环，自环，一个点可能会连接到许多点。我们处理起来可以利用"图"的一些思想（这个不难，百度搜一下BFS，DFS，有向图，搞清楚这3个就OK）
+This vector map may have rings, self-loops, and one point may be connected to many points. We can use the "diagram" some ideas (this is not difficult, Baidu search BFS, DFS, there are diagrams, figure out these three is OK)
 
-我们添加一个类，叫做"BlockParser"，添加如下代码：
+We add a class called "BlockParser" and add the following code.
 
 ``` csharp
 public sealed class BlockParser {
@@ -225,24 +225,24 @@ public sealed class BlockParser {
 }
 ```
 
-jmp指令我们不需要处理，因为处理起来很麻烦，正常的.NET程序里面也不会出现这个指令，想了解jmp是什么，可以看[MSDN](https://docs.microsoft.com/zh-cn/dotnet/api/system.reflection.emit.opcodes.jmp)，IL里的jmp和汇编的jmp不是一个东西。
+The jmp instruction we do not need to deal with, because it is very cumbersome to deal with, normal .NET program will not appear inside this instruction, want to know what jmp is, you can see [MSDN](https://docs.microsoft.com/zh-cn/dotnet/api/system.reflection.emit.opcodes.jmp), IL jmp and compiled jmp is not one thing.
 
-首先我们要分析出潜在的入口。为什么说是潜在的呢？因为方法体可能被混淆了，充斥着许多不可能被执行的指令，比如这样的：
+First we have to analyze the potential entrances. Why is that potential? Because the method body can be confused and filled with instructions that cannot be executed, such as this.
 
-![Alt text](./7.png)
+! [Alt text](. /7.png)
 
-红框部分就是不会被使用的基本块，虽然红框中第一条语句IL_0005处的确是一个入口点。
+The red box section is the basic block that will not be used, although the first statement in the red box at IL_0005 is indeed an entry point.
 
-我们添加字段：
+We add the following fields.
 
 ``` csharp
 private bool[] _isEntrys;
 private int[] _blockLengths;
 ```
 
-_isEntrys表明某条指令是否为潜在的入口点。如果是，那么_blockLengths中会有一个记录，表明了这个入口点表示的基本块有几条指令。	
+_isEntrys indicates whether an instruction is a potential entry point. If so, then there is a record in _blockLengths that indicates how many instructions are in the base block represented by this entry point.	
 
-然后我们可以直接从方法体的开头到结尾扫描一遍，得到上面提到的2个信息。
+We can then scan directly from the beginning to the end of the method body to get the 2 messages mentioned above.
 
 ``` csharp
 private void AnalyzeEntrys() {
@@ -258,7 +258,7 @@ private void AnalyzeEntrys() {
 		case FlowControl.Return:
 		case FlowControl.Throw:
 			if (i + 1 != _instructions.Count)
-				// 如果当前不是最后一条指令，那么下一条指令就是新入口
+				// If the current instruction is not the last one, then the next one is the new entry
 				_isEntrys[i + 1] = true;
 			if (instruction.OpCode.OperandType == OperandType.InlineBrTarget)
 				// brX
@@ -286,14 +286,15 @@ private void AnalyzeEntrys() {
 }
 ```
 
-接下来我们要从每个入口开始进行DFS或者BFS，通过跳转指令排除掉无效的入口点，并且创建出基本块。
+Next, we start with DFS or BFS for each entry, eliminate invalid entry points with a jump command, and create the base block.
 
-DFS，也就是深度优先搜索，有一个很不好的地方，就是如果方法体太大，跳转太多，可能会堆栈溢出，因为深度优先搜索是递归式的。BFS，也就是广度优先搜索，代码会比DFS多一些，但是没多多少。以后我们很多算法都会用到递归操作，所以我们选择代码少的DFS，要分块的时候可以创建一个新线程，指定一个4MB 16MB的堆栈，绝对不会溢出。
+DFS, or depth-first search, has a very bad point, which is that if the method body is too big and there are too many jumps, the stack may overflow, because depth-first search is recursive. bfs, or breadth-first search, the code will be more than DFS, but not by much. In the future, many of our algorithms will use recursive operations, so we choose the DFS with less code, and when we want to chunk, we can create a new thread, specify a 4MB 16MB stack, absolutely no overflow.
 
 ``` csharp
 private void AnalyzeReferencesAndCreateBasicBlocks(int startIndex) {
 	if (!_isEntrys[startIndex])
-		throw new InvalidOperationException("入口识别出错。");
+		throw new InvalidOperationException("Entrance identification error.");
+
 
 	int exitIndex;
 	Instruction exit;
@@ -304,17 +305,17 @@ private void AnalyzeReferencesAndCreateBasicBlocks(int startIndex) {
 	exit = _instructions[exitIndex];
 	switch (exit.OpCode.FlowControl) {
 	case FlowControl.Branch:
-		// 分支块被引用
+		// Branch blocks are referenced.
 		nextEntryIndex = _instructionDictionary[(Instruction)exit.Operand];
 		if (_blockLengths[nextEntryIndex] == 0)
-			// 分支块未被分析
+			// Branch blocks not analyzed
 			AnalyzeReferencesAndCreateBasicBlocks(nextEntryIndex);
 		break;
 	case FlowControl.Cond_Branch:
-		// 下一个块和分支块被引用
+		// Next block and branch block is referenced
 		nextEntryIndex = exitIndex + 1;
 		if (nextEntryIndex < _instructions.Count && _blockLengths[nextEntryIndex] == 0)
-			// 下一条指令就是未分析的新块的入口
+			// The next instruction is the entry to the new unanalyzed block
 			AnalyzeReferencesAndCreateBasicBlocks(nextEntryIndex);
 		if (exit.OpCode.OperandType == OperandType.InlineBrTarget) {
 			// bxx
@@ -333,20 +334,20 @@ private void AnalyzeReferencesAndCreateBasicBlocks(int startIndex) {
 		break;
 	case FlowControl.Call:
 	case FlowControl.Next:
-		// 下一个块被引用
+		// The next block is referenced.
 		nextEntryIndex = exitIndex + 1;
 		if (_blockLengths[nextEntryIndex] == 0)
-			// 我们不需要判断是否到了结尾
-			// 如果没ret，br，throw之类的指令就到了块的结尾，说明这个方法体的控制流是有问题的
+			// We don't need to judge whether we've come to the end
+			// If there's no ret, br, throw, etc., the instruction goes to the end of the block, indicating that there's something wrong with the control flow of the method body
 			AnalyzeReferencesAndCreateBasicBlocks(nextEntryIndex);
 		break;
 	}
 }
 ```
 
-这个就是通过DFS创建出有效的，被使用了的基本块的核心代码。当然，这个创建出来的基本块还是线性的，没有任何块与块之间的信息。
+This is the core code that creates a valid, used base block through DFS. Of course, this created basic block is still linear, without any block-to-block information.
 
-然后我们要为这些基本块添加分支，也就是添加块与块之间的跳转关系（没有包含关系）：
+Then we want to add branches for these basic blocks, i.e. add the jump relationship between the block and the block (no relationship is included).
 
 ``` csharp
 private void AddBranchs() {
@@ -373,7 +374,7 @@ private void AddBranchs() {
 			break;
 		case FlowControl.Cond_Branch:
 			if (nextBasicBlock == null)
-				// nextBasicBlock不应该为null，因为在此之前我们已经移除了无效代码
+				// nextBasicBlock should not be null, because we have removed the invalid code before
 				throw new InvalidOperationException();
 			basicBlock.BranchOpcode = lastInstruction.OpCode;
 			basicBlock.FallThrough = nextBasicBlock;
@@ -407,11 +408,11 @@ private void AddBranchs() {
 }
 ```
 
-处理一些简单的情况，也许不需要转换成树状结构，也就是不需要为基本块之间添加包含关系。但是绝大多数情况，我们都需要转换成树状结构（我们之前定义的MethodBlock）。
+Handle some simple cases that may not need to be converted to a tree structure, i.e. no need to add inclusion relationships between the basic blocks. But in the vast majority of cases, we need to convert to a tree structure (MethodBlock as we defined earlier).
 
-块与块之间的包含关系只与异常处理子句有关，我们只需要把try/catch包含的基本块合并到一起。
+The block-to-block inclusion relationship is only relevant to the exception handling clause, we just need to combine the basic blocks contained in try/catch together.
 
-在这之前，我们要定义出一种新的异常处理子句结构。我们可以在一个try的入口点，也就是try作用域中的第一个基本块标记一下，表示这里有异常处理子句。因为在同一个入口点上，可能是一个try块有多个handler，比如：
+Before that, we have to define a new structure for the exception handling clause. We can mark the entry point of a try, which is the first basic block in the try scope, to indicate that there is an exception handling clause here. Because at the same entry point, it may be that a try block has multiple handlers, for example.
 
 ``` csharp
 try {
@@ -425,7 +426,7 @@ catch (Exception2) {
 }
 ```
 
-还有可能是更复杂的情况，try之间还有嵌套关系：
+There may also be more complex cases where there are nested relationships between the TRIES.
 
 ``` csharp
 try {
@@ -445,7 +446,7 @@ catch (Exception2) {
 }
 ```
 
-考虑到这些情况，我们的结构可以这样定义。当然，并不是一定要这样定义。只是因为我更喜欢这样定义，觉得方便。如果你有更方便的结构，也可以用你的方式进行定义，能达到最终目的就行。
+With these in mind, our structure can be defined in this way. Of course, it doesn't have to be defined that way. Just because I prefer to define it that way and find it convenient. If you have a more convenient structure, it can also be defined in your way that will serve the ultimate purpose.
 
 ``` csharp
 private sealed class LinkedExceptionHandlerInfo {
@@ -469,23 +470,23 @@ private sealed class LinkedExceptionHandlerInfo {
 }
 ```
 
-然后，我们要分析出异常处理子句之间的关系，保存到刚刚定义的结构中。
+Then we have to analyze the relationship between the exception handling clauses, saved in the structure just defined.
 
-我们再添加一个虚假的异常处理子句，叫做dummy。dummy是任何异常处理子句的parent，这个会便于我们进行递归操作来合并作用域中所有块到一个作用域。
+We add a spurious exception handling clause called dummy. dummy is the parent of any exception handling clause and this will allow us to perform a recursive operation to merge all blocks in a scope into one scope.
 
 ``` csharp
 private LinkedExceptionHandlerInfo _linkedExceptionHandlerInfoRoot;
 
 private void AnalyzeExceptionHandlers() {
 	_linkedExceptionHandlerInfoRoot = new LinkedExceptionHandlerInfo(new ExceptionHandlerInfo(0, int.MaxValue));
-	// 创建Dummy
+	// Create Dummy
 	foreach (ExceptionHandlerInfo exceptionHandlerInfo in _exceptionHandlerInfos) {
 		bool isTryEqual;
 		LinkedExceptionHandlerInfo scope;
 
 		if (!exceptionHandlerInfo.IsVisited) {
 			Debug.Assert(false);
-			// 正常情况下我们不会遇到无效异常处理信息，目前也没有壳会加入无效异常处理信息
+			// Normally we do not encounter invalid exceptions, and currently no shells add invalid exceptions.
 			continue;
 		}
 		scope = _linkedExceptionHandlerInfoRoot.FindParent(exceptionHandlerInfo, out isTryEqual);
@@ -507,13 +508,13 @@ private void AnalyzeExceptionHandlers() {
 					LinkedExceptionHandlerInfo subChild;
 
 					subChild = children[i];
-					// 判断child是否为某个subChild的scope
+					// Determine whether a child is the scope of a subChild
 					if (child.TryInfo.HasChild(subChild.TryInfo)) {
 						child.Children.Add(subChild);
 						subChildCount++;
 					}
 					else
-						// 将subChild提前
+						// Advance subChild
 						children[i - subChildCount] = subChild;
 				}
 				children.RemoveRange(children.Count - subChildCount, subChildCount);
@@ -524,9 +525,9 @@ private void AnalyzeExceptionHandlers() {
 }
 ```
 
-还记得我们之前声明的接口IBlock吗，所有块的结构都要继承自IBlock，表示这是一个块。
+Remember our previous declaration of the interface IBlock, where the structure of all blocks is inherited from IBlock, indicating that it is a block.
 
-我们添加一个字段_blocks表示这个接口的数组。
+We add a field_blocks to represent the array of this interface.
 
 ``` csharp
 private IBlock[] _blocks;
@@ -536,7 +537,7 @@ private void CombineExceptionHandlers(LinkedExceptionHandlerInfo linkedException
 	TryBlock tryBlock;
 
 	if (linkedExceptionHandlerInfo.HasChildren)
-		// 找到最小异常处理块
+		// Find the minimum exception handling block.
 		foreach (LinkedExceptionHandlerInfo child in linkedExceptionHandlerInfo.Children)
 			CombineExceptionHandlers(child);
 	tryInfo = linkedExceptionHandlerInfo.TryInfo;
@@ -552,15 +553,15 @@ private void CombineExceptionHandlers(LinkedExceptionHandlerInfo linkedException
 }
 ```
 
-这样，我们就得到了块与块之间的包含关系，有了一个完整的树状结构，接下来去除_blocks数组里面的null，就是一个MethodBlock了。
+This way, we have a block-to-block containment relationship, a complete tree structure, and the next step is to remove the null from the _blocks array, and we have a MethodBlock.
 
-## 以文本形式显示块
+## Displaying blocks as text
 
-代码不是写出来就没BUG的，要调试了很多次之后才可能没BUG。控制流这个东西本来就抽象，不经过特殊处理，你不能像看河流一样，看出有什么分支，从哪里流向哪里。我们用一个最简单的办法，转换成字符串来显示出这里块。
+The control flow is abstract, without special treatment, you can't look at the river and see what branches are flowing from where to where. Let's use one of the simplest ways of converting to a string to show the block here.
 
-我们先添加一个Helper类叫做BlockEnumerator，可以帮助我们遍历一个IBlock中存在的所有块。
+We start by adding a Helper class called BlockEnumerator, which helps us to iterate through all the blocks that exist in an IBlock.
 
-大概是这样的：
+It goes something like this.
 
 ``` csharp
 public abstract class BlockEnumerator {
@@ -580,7 +581,7 @@ public abstract class BlockEnumerator {
 }
 ```
 
-我们继承这个类，写一个叫BlockPrinter的类，重写基类中OnXXBlockXX的虚函数。比如遇到基本块，我们可以这样：
+We inherit this class, write a class called BlockPrinter, and rewrite the virtual function of OnXXBlockXX in the base class. If we encounter a basic block, for example, we can go like this.
 
 ``` csharp
 protected override void OnBasicBlock(BasicBlock basicBlock) {
@@ -611,19 +612,19 @@ protected override void OnBasicBlock(BasicBlock basicBlock) {
 }
 ```
 
-其它类型的IBlock也一样处理，代码不贴，附件里都有。
+Other types of IBlocks are treated the same, the code is not posted, it's in the attachment.
 
-## 块转换回指令流
+## Block conversion back to command flow
 
-指令流转换到块是一个复杂的过程，块转换回指令流就简单许多了。
+Converting instruction streams to blocks is a complex process, and converting blocks back to instruction streams is much simpler.
 
-首先，我们要把树状结构的块转换回线性的基本块数组，这一步是不是和"指令流转换到块"中的一步恰好相反呢？
+First, we need to convert the tree blocks back to a linear basic array of blocks, isn't this the opposite of the step in "Stream to block"?
 
-转换到基本块之后，我们才能更方便地生成跳转语句和元数据中的异常处理子句。
+After converting to basic blocks, we can more easily generate jump statements and exception handling clauses in metadata.
 
-我们先添加一个类叫BlockInfo，这个类的实例要作为额外数据添加到每一个基本块。
+We start by adding a class called BlockInfo, and instances of this class are added to each basic block as additional data.
 
-如果一个基本块是一个异常处理子句的入口点，那么这个基本块的BlockInfo的_tryBlocks将不为null，我们可以利用额外信息来生成异常处理子句。
+If a base block is the entry point for an exception handling clause, then the _tryBlocks for this base block of BlockInfo will not be null and we can use the additional information to generate the exception handling clause.
 
 ``` csharp
 private sealed class BlockInfo {
@@ -639,7 +640,7 @@ private sealed class BlockInfo {
 	public List<TryBlock> TryBlocks => _tryBlocks;
 
 	/// <summary>
-	/// 表示当前块是否可以被跳过（当前块必须为只有一条br指令，br的目标就是下一个基本块）
+	/// Indicates whether the current block can be skipped (the current block must be only one BR instruction, the target of the BR is the next basic block)
 	/// </summary>
 	public bool CanSkip {
 		get => _canSkip;
@@ -648,7 +649,7 @@ private sealed class BlockInfo {
 }
 ```
 
-再添加一个类叫BlockLayouter。这个类可以把MethodBlock转换成许多基本块的集合，并且为基本块添加额外数据
+Add a class called BlockLayouter. this class can convert MethodBlock into a collection of many basic blocks and add additional data to the basic blocks
 
 ``` csharp
 private sealed class BlockLayouter : BlockEnumerator {
@@ -681,7 +682,7 @@ private sealed class BlockLayouter : BlockEnumerator {
 }
 ```
 
-我们利用转换得到的List&lt;BasicBlock&gt;生成指令流。
+We use the converted List&lt;BasicBlock&gt;to generate the instruction flow.
 
 ``` csharp
 private void GenerateInstructions() {
@@ -693,7 +694,7 @@ private void GenerateInstructions() {
 		if (basicBlock.IsEmpty && basicBlock.BranchOpcode.Code == Code.Br && basicBlock.FallThrough == _basicBlocks[i + 1])
 			basicBlock.PeekExtraData<BlockInfo>().CanSkip = true;
 	}
-	// 设置CanSkip
+	// Setting up CanSkip
 	foreach (BasicBlock basicBlock in _basicBlocks) {
 		Instruction branchInstruction;
 
@@ -713,7 +714,7 @@ private void GenerateInstructions() {
 			else
 				branchInstruction.Operand = GetFirstInstruction(basicBlock.ConditionalTarget);
 	}
-	// 添加跳转指令
+	// Add Jump Command
 	for (int i = 0; i < _basicBlocks.Count; i++) {
 		BasicBlock basicBlock;
 		BlockInfo blockInfo;
@@ -728,12 +729,12 @@ private void GenerateInstructions() {
 		nextBasicBlock = i + 1 == _basicBlocks.Count ? null : _basicBlocks[i + 1];
 		if (branchInstruction.OpCode.Code == Code.Br) {
 			AppendInstructions(basicBlock, basicBlock.FallThrough == nextBasicBlock);
-			// 为无条件跳转指令时，如果直达块就是下一个块，那么可以省略分支指令
+			// For an unconditional jump instruction, the branch instruction can be omitted if the direct to block is the next block
 		}
 		else if (branchInstruction.OpCode.FlowControl == FlowControl.Cond_Branch) {
 			AppendInstructions(basicBlock, false);
 			if (basicBlock.FallThrough != nextBasicBlock)
-				// 需要修复跳转
+				// Need to fix the jump.
 				_instructions.Add(new Instruction(OpCodes.Br, GetFirstInstruction(basicBlock.FallThrough)));
 		}
 		else
@@ -750,16 +751,16 @@ private void AppendInstructions(BasicBlock basicBlock, bool canSkipBranchInstruc
 }
 ```
 
-代码中的CanSkip代表这个块是不是一个只有br跳转指令，没有其它指令的基本块，而且br的目标就是下一个基本块。如果是，这个基本块可以被省略，完全不处理。如果一个基本块的跳转指令是br，目标也是下一个基本块，那么我们只需要添加这个基本块的其它指令，不需要添加跳转指令。
+The CanSkip in the code represents whether this block is a base block with only BR jump instructions, no other instructions, and the target of BR is the next base block. If so, this basic block can be omitted and not dealt with at all. If the jump instruction for a basic block is BR and the target is also the next basic block, then we only need to add the other instructions for this basic block, not the jump instruction.
 
-接着就是生成异常处理子句。核心代码就这一点：
+The next step is to generate the exception handling clause. The core code is this.
 
 ``` csharp
 private void GenerateExceptionHandlers() {
 	_exceptionHandlers = new List<ExceptionHandler>();
 	for (int i = _basicBlocks.Count - 1; i >= 0; i--) {
-		// 最里面的异常块应该首先声明。(错误: 0x801318A4)
-		// 所以我们倒序遍历
+		// The innermost exception block should be declared first. (Error: 0x801318A4)
+		// So we iterate backwards.
 		BasicBlock basicBlock;
 		List<TryBlock> tryBlocks;
 
@@ -789,22 +790,22 @@ private void GenerateExceptionHandlers() {
 }
 ```
 
-还有生成用到了的局部变量列表，这里就不贴了。其实我那个生成局部变量的代码可能有点麻烦，直接改成遍历所有基本块，发现了第一次遇到的局部变量就添加到列表简单很多。整个项目都打包好了，我就懒得改了。
+There is also a list of local variables that have been generated, which will not be posted here. In fact, my code for generating local variables may be a bit cumbersome, directly changing to traversing all the basic blocks, finding the local variables first encountered and adding them to the list is much easier. With the whole project packed away, I was too lazy to change.
 
-## 画出控制流
+## Draw the control flow.
 
-这个是新加的一节，我也是今天上午临时学了一下画控制流，这里直接贴下效果图。然后这个画出的控制流好像不能表现出异常处理块的关系。
+This is a new section, I also learned to draw control flow temporarily this morning, here is the effect picture directly posted. Then this drawn control stream doesn't seem to be able to show the relationship of the anomaly handling block.
 
-![Alt text](./8.png)
+! [Alt text](. /8.png)
 
-![Alt text](./9.png)
+! [Alt text](. /9.png)
 
-红线表示无条件跳转，绿线表示条件跳转。画出来好像也没什么卵用，只是看着舒服些。
+The red line indicates an unconditional jump and the green line indicates a conditional jump. It doesn't seem to do much good to draw it, it just looks more comfortable.
 
-## 下载
+## Download
 
-控制流分析项目下载地址：
-[百度云](https://pan.baidu.com/s/1LngQL7wd8Ank3Kn6Mh-7wQ) 提取码: mms4
+Control Flow Analysis Project download address.
+[Baidu Cloud](https://pan.baidu.com/s/1LngQL7wd8Ank3Kn6Mh-7wQ) Extraction code: mms4
 
-控制流绘制项目下载地址（没源码，反编译压缩包里面的ConsoleApp1.exe就可以）：
-[百度云](https://pan.baidu.com/s/1VMZBZKBxud29j9DtHupOPg) 提取码: nbpe
+Control flow drawing project download address (no source code, decompile the compressed package inside the ConsoleApp1.exe can be).
+[Baidu Cloud](https://pan.baidu.com/s/1VMZBZKBxud29j9DtHupOPg) pickup code: nbpe
