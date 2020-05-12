@@ -1,138 +1,139 @@
-# [.NET]详解ILProtector并写出脱壳机 by Wwh / NCK
+# [.NET] Detailing the ILProtector and writing out the decoiler by Wwh / NCK
 
-## 前言
+## preamble
 
-ILProtector应该算是一款强度不是太高，兼容性还不错的壳，网上有关这个壳的资料几乎没有。但是有CodeCracker大神放出的脱壳机和一些基于他的脱壳机改进得到的脱壳机。
+ILProtector should be considered a shell that is not too strong and has good compatibility, there is little information about it online. But there's the decoiler put out by the CodeCracker gods and some decoilers based on his improved decoilers.
 
-这些脱壳在最新版本的ILProtector上已经失效了，但是原理并没有失效。许多人只是使用这些脱壳机，是并不知道其中的原理。这些脱壳机一失效，便无法脱壳。
+These decapsulations have failed on the latest version of ILProtector, but the principle does not fail. Many people just use these strippers and are not aware of the principles involved. Once these deshellers fail, they cannot be deshelled.
 
-本文将详解ILProtector的加壳原理并基于GitHub上开源的一个项目（[ILProtectorUnpacker  by RexProg](https://github.com/RexProg/ILProtectorUnpacker)）写出属于自己的脱壳机。
+In this article, we will explain the principle of ILProtector Unpacker and write our own unpacker based on an open source project on GitHub ([ILProtectorUnpacker by RexProg](https://github.com/RexProg/ILProtectorUnpacker)).
 
-在研究之前，我们还是需要找到一个ILProtector加壳的样本。很遗憾，没在网上找到最新ILProtector加壳的UnpackMe，所以我们直接拿ILProtector主程序开刀（官网上写了"ILProtector is protected by itself!"）。
+We still need to find a sample of the ILProtector plus shell before we can research it. Unfortunately, we didn't find the latest UnpackMe for ILProtector, so we just took the main ILProtector program (it says "ILProtector is protected by itself!" on the official website).
 
-在研究的时候，用的是2.0.22.4版本的ILProtector，但是写文章的时候发现ILProtector更新到了2.0.22.5，有点尴尬。但是我测试过了，2.0.22.5和2.0.22.4并没有区别，所以本文还是以ILProtector v2.0.22.4主程序为样本来研究。这里提供打包好的文件下载：[ILProtector v2.0.22.4.7z](https://github.com/wwh1004/blog/raw/master/%5B.NET%5D%E8%AF%A6%E8%A7%A3ILProtector%E5%B9%B6%E5%86%99%E5%87%BA%E8%84%B1%E5%A3%B3%E6%9C%BA/ILProtector%20v2.0.22.4.7z)
+At the time of research, ILProtector version 2.0.22.4 was used, but it was a bit awkward to find out that ILProtector had been updated to 2.0.22.5 when writing the article. But I tested it and there is no difference between 2.0.22.5 and 2.0.22.4, so this article looks at the ILProtector v2.0.22.4 main program as a sample. Here are the packaged files to download：[ILProtector v2.0.22.4.7z](https://github.com/wwh1004/blog/raw/master/%5B.NET%5D%E8%AF%A6%E8%A7%A3ILProtector%E5%B9%B6%E5%86%99%E5%87%BA%E8%84%B1%E5%A3%B3%E6%9C%BA/ILProtector%20v2.0.22.4.7z)
 
-## ILProtector保护方式概览
+## ILProtector Overview of protection modalities
 
-我们先用dnSpy打开ILProtector看看这究竟是怎样保护的：
+Let's start with dnSpy open ILProtector see how this is protected.：
 
 ![反编译ILProtector](./反编译ILProtector.png)
 
-我们可以看到方法体被隐藏了，全部被替换成了"&ltModule&gt.Invoke(num)"。尝试用dnSpy调试：
+We can see that the method body has been hidden and replaced with "&ltModule&gt.Invoke(num)". Try debugging with dnSpy:.
 
-先在Main方法这里下断点：
+Let's break it here in the Main method.：
 
 ![调试ILProtector-1](./调试ILProtector-1.png)
 
-断下来后按F11单步：
+Press F11 in one step after the break.：
 
 ![调试ILProtector-2](./调试ILProtector-2.png)
 
-可以初步判断出应该是用了DynamicMethod，我们在DynamicMethod的构造器处下断点，并按F5运行：
+As a preliminary indication that DynamicMethod is being used, we place a breakpoint in the DynamicMethod constructor and run it at F5.
 
 ![调试ILProtector-3](./调试ILProtector-3.png)
 
-没错，我们的猜错是对的，ILProtector用了DynamicMethod动态生成一个方法体来保护程序集的。
+That's right, we guessed wrong, the ILProtector uses DynamicMethod to dynamically generate a method body to protect the assembly.
 
-## ILProtectorUnpacker by RexProg的脱壳原理
+## ILProtectorUnpacker by RexProg The Principle of Deshelling
 
-### 脱壳流程
+### shedding process
 
-为了避免各种没有特别大意义的尝试，我们来看看文章开头提到的那个开源项目是怎么实现脱壳的。我们先在vs里面打开这个项目。（这个提供打包好的项目下载：[ILProtectorUnpacker by RexProg.7z](https://github.com/wwh1004/blog/blob/master/%5B.NET%5D%E8%AF%A6%E8%A7%A3ILProtector%E5%B9%B6%E5%86%99%E5%87%BA%E8%84%B1%E5%A3%B3%E6%9C%BA/ILProtectorUnpacker%20by%20RexProg.7z?raw=true)）
+To avoid all sorts of attempts that don't make particularly great sense, let's look at how the open source project mentioned at the beginning of the article came to be stripped down. Let's open this item inside VS first.（This provides packaged items to download：[ILProtectorUnpacker by RexProg.7z](https://github.com/wwh1004/blog/blob/master/%5B.NET%5D%E8%AF%A6%E8%A7%A3ILProtector%E5%B9%B6%E5%86%99%E5%87%BA%E8%84%B1%E5%A3%B3%E6%9C%BA/ILProtectorUnpacker%20by%20RexProg.7z?raw=true)）
 
-找到Main方法，看看是怎么一回事（下面的注释都是我自己加的）：
+Find the Main method and see what it's all about (I added the following comments myself).
 
 ![RexProg的脱壳机的Main方法](./RexProg的脱壳机的Main方法.png)
 
-可以发现真正的实现是在InvokeDelegates中，转到这个方法：
+The real implementation can be found in InvokeDelegates, go to this method.
 
 ![RexProg的脱壳机的InvokeDelegates方法](./RexProg的脱壳机的InvokeDelegates方法.png)
 
-### 过检测
+### pass a test
 
-此刻我们大概搞懂脱壳机的脱壳流程了。脱壳机先加载被保护的程序集，接着对一个地方进行Hook，然后手动调用Invoke来获取动态方法，再使用dnlib提供的DynamicMethodBodyReader读取这个动态方法的方法体，还原到文件中的方法体中。刚才提到了Hook，既然是Hook，那八九不离十的与过检测有关，我们来看看Hook了什么玩意：
+At this point, we probably understand the process of disassembling a disassembling machine. The sheller first loads the protected assembly, then Hooks a place, then manually calls Invoke to get the dynamic method, then uses the DynamicMethodBodyReader provided by dnlib to read the method body of this dynamic method and restore it to the method body in the file. We just mentioned Hook, and since it's Hook, it's probably related to testing, let's see what Hook has.
 
 ![反编译System.Diagnostics.StackFrameHelper.GetMethodBase](./反编译System.Diagnostics.StackFrameHelper.GetMethodBase.png)
 
-对应的Detour：
+Corresponding Detour：
 
 ![RexProg的脱壳机的Hook4方法](./RexProg的脱壳机的Hook4方法.png)
 
-到这里我们不是特别明白为什么要Hook System.Diagnostics.StackFrameHelper.GetMethodBase，也不明白"if (result.Name == "InvokeMethod")"中的InvokeMethod是何方神圣，我们再次用dnSpy搜索并反编译InvokeMethod看看：
+Here we don't particularly understand why Hook System.Diagnostics.StackFrameHelper.GetMethodBase, nor do we understand what InvokeMethod is in "if (result.Name == "InvokeMethod")", let's search and decompile InvokeMethod with dnSpy again to see.
 
 ![反编译System.RuntimeMethodHandle.InvokeMethod](./反编译System.RuntimeMethodHandle.InvokeMethod.png)
 
-如果有点逆向经验的，应该会知道这个是调用MethodInfo.Invoke时，在托管代码中进入CLR的地方，可以理解成Win32编程中R3转到R0的地方。
+Those with a bit of reverse experience should know that this is where the call to MethodInfo.Invoke goes into the CLR in the hosted code, which can be understood as where R3 goes to R0 in Win32 programming.
 
 ![System.RuntimeMethodHandle.InvokeMethod调用堆栈](./System.RuntimeMethodHandle.InvokeMethod调用堆栈.png)
 
-再结合一些反非法调用的检测原理，可以知道，ILProtector会检测调用堆栈中，被保护方法的上一个方法，比如这样：
+Combined with some anti-illegal call detection principles, it is known that the ILProtector detects the previous method of the protected method in the call stack, such as this.
 
 ![ILProtector的调用堆栈检测](./ILProtector的调用堆栈检测.png)
 
-假设箭头2指向的是被保护的方法，箭头1指向的是与ILProtector运行时的非托管代码（当成是，因为dnSpy没法单步进入非托管代码），那么运行时的非托管代码会检测箭头2指向的调用者（Caller）是不是被保护的方法，即这里的"internal static FormPos Load(string fileName)"。如果我们手动Invoke来获取动态方法，那么非托管代码检测到的就不会是"internal static FormPos Load(string fileName)"了，而是刚才提到的"System.RuntimeMethodHandle.InvokeMethod"，所以RegProg的脱壳机Hook了GetMethodBase，并且写了
+Assuming that arrow 2 points to the protected method and arrow 1 points to the unmanaged code running with the ILProtector (as if it were, since dnSpy can't single-step into unmanaged code), then the unmanaged code at runtime will detect if the caller pointed to by arrow 2 is the protected method, i.e. "internal static FormPos Load(string fileName)". If we manually Invoke to get the dynamic method, then the unmanaged code detected will not be "internal static FormPos Load(string fileName)", but the just mentioned "System.
+
 ``` csharp
 if (result.Name == "InvokeMethod")
-    // 这是一个很关键的地方。如果得到的结果的Name是"InvokeMethod"，那么把这个MethodBase替换成当前要解密的方法的MethodBase
+    // This is a very critical place. If the resulting Name is "InvokeMethod", then replace this MethodBase with the MethodBase of the current method to be decrypted.
     result = Assembly.Modules.FirstOrDefault()?.ResolveMethod(CurrentMethod.MDToken.ToInt32());
 ```
-来过检测。
+I've been here for testing.。
 
-这段解释有点难理解，虽然尽可能的详细解释了。读者可能会看不太明白，但是知道个大概，所以还是需要自己调试跟踪看看，实践才能真正学习到知识！
+The explanation is a bit hard to understand, although it's explained in as much detail as possible. Readers may not understand too much, but know a general idea, so still need to debug and follow up yourself, practice to really learn!
 
-### 出错了！
+### Something went wrong.！
 
-看着我写的，是不是觉得ILProtectorUnpacker写得非常完美？但是道高一尺魔高一丈，有了过检测，也会有反过检测。我们直接编译RexProg的脱壳机并运行：
+Looking at what I wrote, does it feel like ILProtectorUnpacker has written it perfectly? However, with the test, there will also be a reverse test. We compiled RexProg's stripper directly and ran.
 
 ![RexProg的脱壳机出错了](./RexProg的脱壳机出错了.png)
 ![RexProg的脱壳机的出错位置](./RexProg的脱壳机的出错位置.png)
 
-为什么会这样呢，经过各种分析和尝试，也为了文章更简洁，这里将直接写上正确的分析反过检测过程（ILProtector检测到了我们手动调用Invoke）
+Why is this, after various analyses and attempts, and for the sake of a more concise article, here will be written directly on the correct analysis of the inverse detection process (ILProtector detected that we manually called Invoke)
 
-## ILProtector的检测
+## ILProtector detection
 
-首先，ILProtector会检测调用堆栈，我们进行处理了，并且正常工作，那么为什么还会被ILProtector检测到非法调用呢？答：ILProtector检测到了我们的Hook。
+First of all, the ILProtector detects the call stack, we process it and it works, so why are illegal calls detected by the ILProtector? A: ILProtector detected our Hook.
 
-先修改一下Memory.Hook，让它输出一些信息（Hook中Target的地址和Detour的地址）：
+First modify Memory.Hook so that it outputs some information (Target's address and Detour's address in Hook).
 
 ![修改Memory.Hook](./修改Memory.Hook.png)
 
-打开x64dbg，启动脱壳机，并让脱壳机运行，到"Console.ReadKey(true);"处停下就行：
+Open x64dbg, start the stripper and let it run, stop at "Console.ReadKey(true);".
 
 ![Memory.Hook输出的信息](./Memory.Hook输出的信息.png)
 
-到x64dbg的内存窗口中转到第一个地址，第一个地址是被Hook的方法的地址，即System.Diagnostics.StackFrameHelper.GetMethodBase的地址，然后给System.Diagnostics.StackFrameHelper.GetMethodBase下硬件访问断点：
+Go to the first address in the x64dbg memory window, the first address is the address of the method that was Hooked, i.e. the address of System.
 
 ![给System.Diagnostics.StackFrameHelper.GetMethodBase下硬件访问断点](./给System.Diagnostics.StackFrameHelper.GetMethodBase下硬件访问断点.png)
 
-控制台里面随便按一个按键，让脱壳机继续执行，直到断在了ProtectXXX.dll。
+Press a button inside the console and let the stripper continue to run until it breaks at ProtectXXX.dll.
 
 ![ILProtector的Hook检测的地址](./ILProtector的Hook检测的地址.png)
 
-这里是一个jcc指令，更能证明这里是检测是否被Hook。为了方便，而且这是个未加壳的DLL，我们直接上IDA，反编译这个Hook检测函数。这个函数的RVA是0x31B70，所以直接在IDA中搜索"31B70"。
+Here's a jcc instruction that better proves that this is a Hook test. for convenience and because it's an uncased DLL, we'll go straight to IDA and decompile the Hook test function. The RVA of this function is 0x31B70, so search for "31B70" directly in the IDA.
 
 ![IDA反编译Hook检测函数](./IDA反编译Hook检测函数.png)
 
-我已经把代码重命名好了，所以读者可以直接思考这段检测的原理。我还是大概解释一下这个检测：
+I've renamed the code so the reader can think directly about the rationale for this detection. I'll explain this test roughly.
 
-IsHooked(char *pEntry)会被传入要检测的地址，比如这次用x64dbg调试，被传入的地址就是0x05067850。
+IsHooked(char *pEntry)The address to be detected will be passed, for example, this time with x64dbg debugging, the address passed is 0x05067850.
 
 ``` cpp
 if ( *pEntry == 0x55 )
   offset = 1;
 ```
 
-这段代码可以认为是垃圾代码，不需要理解
+This code can be considered junk code and doesn't need to be understood
 
 ``` cpp
-while ( offset < 0xFF && pEntry[offset] == 0x90u )// 跳过nop
+while ( offset < 0xFF && pEntry[offset] == 0x90u )// Skip the nop.
   ++offset;
 ```
 
-跳过nop
+Skip the nop.
 
 ``` cpp
-if ( pEntry[offset] == 0xE9u )                // 第一条指令为jmp XXXXXXXX
+if ( pEntry[offset] == 0xE9u )                // The first directive is JMP. XXXXXXXX
 {
   result = 1;
 }
@@ -144,39 +145,39 @@ else
 return result;
 ```
 
-判断nop后（如果存在nop）的第一条指令是不是jmp。如果是jmp，返回true，表示检测到了Hook；如果不是jmp，表示代码正常，未被Hook，设置一个标志后（这个标志不用管），返回false。
+Determine if the first instruction after NOP (if there is a NOP) is JMP. if it is JMP, return TRUE, indicating that Hook was detected; if not JMP, indicating that the code is normal and not Hooked, after setting a flag (this flag does not matter), return FALSE.
 
-## 再过ILProtector检测
+## Then it was tested by ILProtector.
 
-可是别忘了我们有无数方式来写点JunkCode，直接就过掉了检测。
+But let's not forget that there are countless ways to write a bit of JunkCode and just pass the test.
 
-我们先看看脱壳机把System.Diagnostics.StackFrameHelper.GetMethodBase改成什么样了：
+Let's first look at what the stripper has done with System.Diagnostics.StackFrameHelper.GetMethodBase.
 
 ![System.Diagnostics.StackFrameHelper.GetMethodBase被Hook成这样了](./System.Diagnostics.StackFrameHelper.GetMethodBase被Hook成这样了.png)
 
-难怪会被检测到，这第一条指令就是jmp，Hook得太直接了。我们玩点花样，在"jmp 0x06715AA8"前面加个0xEB 0x00，相当于"jmp eip/rip+2"。
+No wonder it was detected, this first instruction was JMP, Hook was too direct. Let's play a little trick and add 0xEB 0x00 in front of "jmp 0x06715AA8", equivalent to "jmp eip/rip+2".
 
 ![加点JunkCode](./加点JunkCode.png)
 
-按F8单步到Hook检测返回，可以发现，它返回false了。按F5发现脱壳机不报错了，也就是我们的再过检测成功了！
+Pressing F8 to single-step to the Hook detection return, you can find that it returns false. Press F5 to find that the stripper is not reporting an error, which means our re-test was successful!
 
 ![Hook检测返回false](./Hook检测返回false.png)
 ![RexProg的脱壳机成功脱壳](./RexProg的脱壳机成功脱壳.png)
 ![反编译RexProg的脱壳机脱壳产物](./反编译RexProg的脱壳机脱壳产物.png)
 
-## 属于自己的脱壳机
+## Your own hull stripper.
 
-那么对RexProg的ILProtectorUnpacker研究和对ILProtector本身的研究可以告一段落了。接下来开始讲解如何自己写一个脱壳机。
+Then the study of RexProg's ILProtectorUnpacker and the study of ILProtector itself can come to an end. Next began the lecture on how to write a stripper yourself.
 
-写个简单的框架：
+Write a simple framework.：
 
 ![自己的脱壳机-Main方法](./自己的脱壳机-Main方法.png)
 ![自己的脱壳机-Execute方法占位](./自己的脱壳机-Execute方法占位.png)
 ![自己的脱壳机-添加代码-1](./自己的脱壳机-添加代码-1.png)
 
-在调用DecryptAllMethodBodys之前，我们得对System.Diagnostics.StackFrameHelper.GetMethodBase进行Hook。
+Before calling DecryptAllMethodBodys, we have to do a Hook on System.Diagnostics.StackFrameHelper.GetMethodBase.
 
-GetMethodBase是实例方法，所以我们专门写一个类来放Detour方法，在这个类的静态构造器里面插入反射API初始化的代码：
+GetMethodBase is an instance method, so we specifically write a class to put the Detour method, in the static constructor of this class to insert the reflection API initialization code.
 
 ``` csharp
 Module mscorlib;
@@ -188,16 +189,16 @@ MethodInfo_GetTypicalMethodDefinition = mscorlib.GetType("System.RuntimeMethodHa
 MethodInfo_GetMethodBase = mscorlib.GetType("System.RuntimeType").GetMethod("GetMethodBase", BindingFlags.NonPublic | BindingFlags.Static, null, new Type[] { mscorlib.GetType("System.IRuntimeMethodInfo") }, null);
 ```
 
-注意，因为是Hook了的，所以this指针是错误的，FieldInfo_rgMethodHandle这样的字段要定义为静态的字段，如果不理解，可以改成非静态，看看如何报错，这里不演示了。
+Note that this pointer is wrong because it is Hook, FieldInfo_rgMethodHandle fields like this should be defined as static fields, if you don't understand, you can change it to non-static, see how to report the error, not demonstrated here.
 
-相较于暴力GetMethodByName，我更喜欢用Attribute来获取自己的Detour。我们定义一个DetourAttribute：
+I prefer to use an Attribute to get my own Detour as opposed to a violent GetMethodByName. we define a DetourAttribute.
 
 ``` csharp
 private sealed class GetMethodBaseDetourAttribute : Attribute {
 }
 ```
 
-回到那个放Detour的类，写上这样的代码：
+Go back to the class that put Detour and write the code like this.
 
 ``` csharp
 [GetMethodBaseDetour]
@@ -219,7 +220,7 @@ public virtual MethodBase GetMethodBaseDetour(int i) {
 }
 ```
 
-这样我们就可以使用
+So that we can use
 
 ``` csharp
 private static MethodInfo GetMethodByAttribute<TClass, TMethodAttribute>() where TMethodAttribute : Attribute {
@@ -234,7 +235,7 @@ private static MethodInfo GetMethodByAttribute<TClass, TMethodAttribute>() where
 }
 ```
 
-来获取Detour，不用担心什么时候代码被混淆了，GetMethodByName会出错。
+To get Detour, don't worry about when the code gets confused, GetMethodByName will make an error.
 
 ``` csharp
 private static void* GetMethodAddress(MethodBase methodBase) {
@@ -248,7 +249,7 @@ private static void WriteJunkCode(ref void* address) {
 	junkJmp = new byte[] {
 		0xEB, 0x00
 	};
-	// 这里使用JunkJmp，相当于jmp eip/rip+2
+	// Use JunkJmp here, equivalent to jmp eip/rip+2
 	Write(address, junkJmp);
 	address = (byte*)address + 2;
 }
@@ -276,9 +277,9 @@ private static void WriteJmp(ref void* address, void* target) {
 }
 ```
 
-写上这样的方法，我们再写个新方法，获取Target的地址和Detour的地址，先对Tagret写入JunkCode，再写入真正的Jmp跳转。
+Writing this way, let's write a new method, get the address of Target and the address of Detour, write JunkCode to Tagret first, then write the real Jmp jump.
 
-此时，我们可以在Execute(string filePath)中加入：
+At this point, we can add the following to the Execute(string filePath).
 
 ``` csharp
 if (Environment.Version.Major == 2)
@@ -287,7 +288,7 @@ else
 	InstallHook(typeof(object).Module.GetType("System.Diagnostics.StackFrameHelper").GetMethod("GetMethodBase", BindingFlags.Public | BindingFlags.Instance), GetMethodByAttribute<StackFrameHelperDetour4, GetMethodBaseDetourAttribute>());
 ```
 
-接下来，我们写好先前定义的DecryptAllMethodBodys()。先在方法内定义变量
+Next, we write the previously defined DecryptAllMethodBodys(). Define the variables within the method first.
 
 ``` csharp
 TypeDef globalType;
@@ -296,7 +297,7 @@ MethodInfo methodInfo_Invoke;
 uint methodTableLength;
 ```
 
-然后，我们要通过反射来获取&ltModule&gt中的"internal static i Invoke"
+Then we have to get the "internal static i Invoke" in &ltModule&gt by reflection.
 
 ``` csharp
 globalType = _moduleDef.GlobalType;
@@ -308,21 +309,21 @@ methodInfo_Invoke = instanceOfInvoke.GetType().GetMethod("Invoke");
 methodTableLength = _moduleDef.TablesStream.MethodTable.Rows;
 ```
 
-methodTableLength表示了程序集里面总共有多少个方法，我们开始遍历每一个方法，所以使用for循环来实现
+methodTableLength represents the total number of methods in the set, we start to iterate through each method, so use the for loop to implement
 
 ``` csharp
 for (uint rid = 1; rid <= methodTableLength; rid++) {
 }
 ```
 
-循环体内定义变量
+In-cycle defined variables
 
 ``` csharp
 MethodDef methodDef;
 object dynamicMethod;
 ```
 
-methodDef表示当前被Resolve的方法，dynamicMethod表示前面i.Invoke(num)返回的的值，这个值是委托，委托内部是动态方法。
+methodDef represents the method currently being Resolved, dynamicMethod represents the value returned by the previous i.Invoke(num), this value is delegated, the delegated internal is dynamic method.
 
 ``` csharp
 methodDef = _moduleDef.ResolveMethod(rid);
@@ -332,7 +333,7 @@ _currentMethod = methodDef;
 dynamicMethod = methodInfo_Invoke.Invoke(instanceOfInvoke, new object[] { methodDef.Body.Instructions[1].GetLdcI4Value() });
 ```
 
-此时，我们准备好了一切，只差Invoke与还原，所以我们再添上它们。
+At this point, we had everything ready, just Invoke and Restore, so we added them again.
 
 ``` csharp
 try {
@@ -347,17 +348,17 @@ catch (Exception) {
 }
 ```
 
-我们运行下脱壳机，发现真的可以解密出方法体。如果真正跟着写了一个脱壳机，真的是非常激动的，自己又研究出了成果，不是么？
+We ran down the decapitator and found that we could really decipher the method body. It would be really exciting to actually follow the writing of a stripper and work out the results yourself, wouldn't it?
 
 ![自己的脱壳机-仅解密方法体](./自己的脱壳机-仅解密方法体.png)
 
-可是我们可以发现，好像还有字符串没有解密。我们再联系一下这个&ltModule&gt中的"internal static s String"，可以知道，这个和Invoke是一样的——一样的调用方式，就可以解密出字符串，这里就不继续贴代码了，因为真的是一样的，而且这个没有检测，直接调用就行。
+But we can find that there seems to be strings left undeciphered. Let's contact the "internal static s String" in this &ltModule&gt again to know that this is the same as Invoke - the same way to call it to decrypt the string.
 
-解密出字符串的效果：
+Decipher the effect of the string.：
 
 ![自己的脱壳机-解密方法体+字符串](./自己的脱壳机-解密方法体+字符串.png)
 
-接下来，我们要移除ILProtector运行时的初始化代码。虽然不移除也没关系，但是为了完美，我们再完善一下脱壳机：
+Next, we want to remove the initialization code from the ILProtector runtime. While it's okay not to remove, for perfection's sake, let's refine the stripper a bit more.
 
 ``` csharp
 private static void RemoveRuntimeInitializer() {
@@ -427,13 +428,13 @@ private static void RemoveRuntimeInitializer() {
 }
 ```
 
-代码中startIndex表示运行时初始化代码的开头，endIndex表示运行时初始化代码的结尾的后一句代码。因为方法体中可能存在跳转，又因为dnlib的一些特性，我们不能直接把Instruction换成Nop，而要这样：
+The startIndex in the code indicates the beginning of the runtime initialization code and the endIndex indicates the end of the runtime initialization code. Because of possible jumps in the method body, and because of some features of dnlib, we can't just replace Instruction with Nop, but rather this.
 
 ``` csharp
 instructionList[i].OpCode = OpCodes.Nop;
 instructionList[i].Operand = null;
 ```
 
-除此之外，被保护的程序集中还有一些别的ILProtector造成的残留代码，移除方法就不一一阐述。
+In addition to this, there are some other residual code in the protected program set caused by the ILProtector, and the removal method is not described.
 
-放出成品脱壳机没有太大的意思，还是更希望读者能自己照着文章研究出脱壳机。而不是只会使用别人写好的，哪天加壳工具一更新，脱壳机失效，就不会脱壳了。
+There's not much point in releasing the finished stripper, or would you rather the reader research the stripper for themselves according to the article. Instead of just using what someone else wrote, one day the shelling tool will be updated and the stripper won't work, it won't be stripped.
