@@ -1,3 +1,6 @@
+## May 22, 2020
+[[.NET] Eazfuscator-Anti-Virtual-IL](https://github.com/NotPrab/blog/blob/master/%5B.NET%5D%20Eazfuscator-Anti-Virtual-IL.md)
+
 ## August 9, 2019
 [[.NET]Anti-aliasing VMP.NET Mutation](https://github.com/wwh1004/blog/tree/master/%5B.NET%5D%E5%8F%8D%E6%B7%B7%E6%B7%86VMP.NET%E4%B9%8BMutation)
 
